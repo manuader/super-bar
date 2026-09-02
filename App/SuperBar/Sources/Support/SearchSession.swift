@@ -17,7 +17,22 @@ struct RunningApp: Hashable, Sendable {
     }
 
     init(_ app: NSRunningApplication, isFrontmost: Bool) {
-        self.init(pid: app.processIdentifier, name: app.localizedName ?? app.bundleIdentifier ?? "App", bundleIdentifier: app.bundleIdentifier, icon: app.icon, isFrontmost: isFrontmost)
+        self.init(pid: app.processIdentifier, name: app.localizedName ?? app.bundleIdentifier ?? "App", bundleIdentifier: app.bundleIdentifier, icon: RunningApp.rasterize(app.icon), isFrontmost: isFrontmost)
+    }
+
+    /// App icons are decoded lazily by IconServices; drawing them once into a
+    /// small bitmap makes them render immediately (and cheaply) in rows.
+    static func rasterize(_ image: NSImage?, size: CGFloat = 32) -> NSImage? {
+        guard let image else { return nil }
+        let out = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+        // Force the drawing block to run now and cache the result as a bitmap.
+        guard let tiff = out.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return image }
+        let bitmap = NSImage(size: NSSize(width: size, height: size))
+        bitmap.addRepresentation(rep)
+        return bitmap
     }
 }
 
