@@ -118,7 +118,10 @@ make install    # copy to /Applications
 make snapshot   # render the palette from fixture data into snapshots/*.png
 ```
 
-The project is generated from `project.yml` with XcodeGen. An "Apple
+The project is generated from `project.yml` with XcodeGen. `make snapshot`
+renders the palette from fixture data; with Accessibility granted, the app can
+also dump real menu bars and drive itself end to end (see
+`.claude/skills/macos-native-app/SKILL.md` for the `SUPERBAR_DIAG*` variables). An "Apple
 Development" certificate in your keychain gives the app a stable code
 identity, so macOS keeps the Accessibility grant across rebuilds; otherwise the
 build is ad-hoc signed and the grant has to be renewed after each build.

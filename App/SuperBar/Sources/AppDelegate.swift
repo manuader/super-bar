@@ -33,8 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         } else {
             menuSource = AXMenuSource()
         }
-        if SnapshotHarness.isEnabled || AppDelegate.isRunningTests {
-            // Never touch the real preferences or recents from the harness/tests.
+        if SnapshotHarness.isEnabled || AppDelegate.isRunningTests || Diagnostics.isEnabled {
+            // Never touch the real preferences or recents from the harness/tests/diagnostics
+            // (a second instance saving its stale copy would clobber the installed app's file).
             let suite = UserDefaults(suiteName: "com.manuader.SuperBar.harness")!
             suite.removePersistentDomain(forName: "com.manuader.SuperBar.harness")
             preferences = Preferences(defaults: suite)
