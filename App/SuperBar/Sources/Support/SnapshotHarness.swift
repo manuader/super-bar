@@ -73,6 +73,11 @@ enum SnapshotHarness {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             guard let view = palette.panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(2) }
+            if env["SUPERBAR_DEBUG"] != nil, let scroll = palette.outlineView.enclosingScrollView {
+                var rows: CGFloat = 0
+                for r in 0..<palette.outlineView.numberOfRows { rows += palette.outlineView.rect(ofRow: r).height }
+                print("doc height:", palette.outlineView.frame.height, "sum rows:", rows, "clip:", scroll.contentView.bounds.height, "scroll origin:", scroll.contentView.bounds.origin.y, "panel:", palette.panel.frame.height)
+            }
             view.cacheDisplay(in: view.bounds, to: rep)
             if let data = rep.representation(using: .png, properties: [:]) {
                 try? data.write(to: URL(fileURLWithPath: output))

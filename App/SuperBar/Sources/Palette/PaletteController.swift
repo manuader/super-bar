@@ -693,6 +693,10 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         let listBottom = PaletteMetrics.footerHeight + 1
         scrollView.frame = NSRect(x: 0, y: listBottom, width: w, height: max(0, listTop - listBottom))
         outlineView.sizeLastColumnToFit()
+        // When everything fits, a stale scroll offset from a smaller frame would clip the first rows.
+        if outlineView.numberOfRows > 0, outlineView.frame.height <= scrollView.contentView.bounds.height {
+            outlineView.scrollRowToVisible(0)
+        }
     }
 
     private func applyTheme() {
