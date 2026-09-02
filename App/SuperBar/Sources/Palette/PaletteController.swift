@@ -65,6 +65,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     func show() {
         let target = app.targetApplication
+        Log.palette.notice("show for \(target?.localizedName ?? "nil", privacy: .public) (pid \(target?.processIdentifier ?? 0))")
         let appChanged = target?.processIdentifier != currentApp?.processIdentifier
         currentApp = target
         session.isTrusted = app.menuSource.isTrusted
@@ -94,8 +95,9 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         searchField.currentEditor()?.selectAll(nil)
     }
 
-    func hide() {
+    func hide(reason: String = #function) {
         guard isVisible else { return }
+        Log.palette.notice("hide (\(reason, privacy: .public))")
         panel.orderOut(nil)
     }
 
@@ -488,7 +490,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     func windowDidResignKey(_ notification: Notification) {
         // Clicking elsewhere dismisses the palette, like Spotlight.
-        if isVisible && !SnapshotHarness.isEnabled { hide() }
+        Log.palette.notice("resignKey; keyWindow=\(String(describing: NSApp.keyWindow), privacy: .public) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?", privacy: .public)")
+        if isVisible && !SnapshotHarness.isEnabled { hide(reason: "resignKey") }
     }
 
     // MARK: Build views
@@ -683,7 +686,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         } else {
             breadcrumbLabel.stringValue = session.app?.name ?? ""
         }
-        let n = content.itemCount
+        var n = 0
+        for r in 0..<outlineView.numberOfRows where (outlineView.item(atRow: r) as? PaletteRow)?.isSelectable == true { n += 1 }
         countLabel.stringValue = n == 1 ? "1 Item" : "\(n) Items"
     }
 
@@ -746,6 +750,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     // MARK: Keyboard (search field stays first responder)
 
     func controlTextDidChange(_ obj: Notification) {
+        Log.palette.debug("query=\(self.searchField.stringValue, privacy: .public)")
         session.query = searchField.stringValue
         updateClearButton()
         reload(selectPreferred: true)
@@ -753,6 +758,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         let flags = NSApp.currentEvent?.modifierFlags ?? []
+        Log.palette.debug("command \(NSStringFromSelector(selector), privacy: .public)")
         switch selector {
         case #selector(NSResponder.moveUp(_:)): moveSelection(by: -1); updateFooter(); return true
         case #selector(NSResponder.moveDown(_:)): moveSelection(by: 1); updateFooter(); return true
@@ -893,6 +899,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
             if !content.isSearching { session.userExpanded.insert(row.id) }
         }
         assignQuickIndices()
+        updateFooter()
         fitHeight()
     }
 
@@ -902,6 +909,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
             session.userExpanded.remove(row.id)
         }
         assignQuickIndices()
+        updateFooter()
         fitHeight()
     }
 }

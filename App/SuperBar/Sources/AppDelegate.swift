@@ -27,7 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     static var isRunningTests: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
 
     override init() {
-        if SnapshotHarness.isEnabled || ProcessInfo.processInfo.environment["SUPERBAR_FIXTURE"] == "1" {
+        let env = ProcessInfo.processInfo.environment
+        if (SnapshotHarness.isEnabled && env["SUPERBAR_REAL_APP"] == nil) || env["SUPERBAR_FIXTURE"] == "1" {
             menuSource = FixtureMenuSource(roots: FixtureMenuSource.notesLike())
         } else {
             menuSource = AXMenuSource()
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
         if AppDelegate.isRunningTests { return }
+        if Diagnostics.isEnabled { Diagnostics.run(app: self); return }
         enforceSingleInstance()
         reloadScripts()
         scriptsWatcher = ScriptsWatcher(root: scriptsRoot) { [weak self] in self?.reloadScripts() }
@@ -121,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func enforceSingleInstance() {
         let mine = Bundle.main.bundleIdentifier ?? ""
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: mine).filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
-        if !others.isEmpty && !SnapshotHarness.isEnabled {
+        if !others.isEmpty && !SnapshotHarness.isEnabled && !Diagnostics.isEnabled {
             others.first?.activate(options: [])
             NSApp.terminate(nil)
         }
@@ -138,9 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard preferences.hotKeyEnabled else { return }
         if let front = NSWorkspace.shared.frontmostApplication, isExcluded(front) { return }
         do {
-            try hotKeys.register(preferences.hotKey) { [weak self] in self?.palette.toggle() }
+            try hotKeys.register(preferences.hotKey) { [weak self] in
+                Log.hotkey.notice("hot key fired")
+                self?.palette.toggle()
+            }
+            Log.hotkey.notice("registered \(self.preferences.hotKey.display, privacy: .public)")
         } catch {
             hotKeyRegistrationError = error.localizedDescription
+            Log.hotkey.error("registration failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

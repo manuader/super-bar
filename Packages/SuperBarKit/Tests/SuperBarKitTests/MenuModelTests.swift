@@ -34,6 +34,13 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(roots[7].visibleChildCount, 2)
     }
 
+    func testAppleMenuBadgeSuffixIsStripped() {
+        XCTAssertEqual(AXMenuSource.cleanedTitle("System Settings…, 1 update", path: ["Apple"]), "System Settings…")
+        XCTAssertEqual(AXMenuSource.cleanedTitle("App Store, 12 updates", path: ["Apple"]), "App Store")
+        XCTAssertEqual(AXMenuSource.cleanedTitle("Something, 3 updates", path: ["File"]), "Something, 3 updates")
+        XCTAssertEqual(AXMenuSource.cleanedTitle("About This Mac", path: ["Apple"]), "About This Mac")
+    }
+
     func testKeyEquivalentDecodingFromAXAttributes() {
         XCTAssertEqual(KeyEquivalent(cmdChar: "k", modifierMask: 0, virtualKey: nil, glyph: nil)?.display, "⌘K")
         XCTAssertEqual(KeyEquivalent(cmdChar: "M", modifierMask: 1, virtualKey: nil, glyph: nil)?.display, "⇧⌘M")

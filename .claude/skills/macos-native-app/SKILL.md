@@ -54,5 +54,16 @@ the Accessibility grant. Prefer a stable identity while iterating.
 - Snapshot harness env: `SUPERBAR_FIXTURE=1 SUPERBAR_QUERY=bld
   SUPERBAR_MODE=list|outline SUPERBAR_APPEARANCE=dark SUPERBAR_SNAPSHOT=out.png`.
 
+## Real-menu diagnostics (needs Accessibility granted to the app)
+```
+open -n -a build/DerivedData/Build/Products/Debug/SuperBar.app \
+  --env SUPERBAR_DIAG=/tmp/diag --env SUPERBAR_DIAG_QUERY=bld          # dumps every running app
+  --env SUPERBAR_DIAG_APPS=com.apple.finder --env SUPERBAR_DIAG_PRESS=com.apple.finder:6.14
+  --env SUPERBAR_DIAG_REVEAL=com.apple.finder:2.0  --env SUPERBAR_DIAG_HELP=com.apple.finder:tags
+  --env "SUPERBAR_DIAG_E2E=bring all to front"                          # drives the installed app
+```
+Wait for `<dir>/done`, then read `summary.txt`. Real-menu palette PNGs:
+`--env SUPERBAR_SNAPSHOT=/tmp/x.png --env SUPERBAR_REAL_APP=com.apple.finder`.
+
 ## Verification before claiming done
 `make test && make build && make snapshot`, then look at the PNGs.

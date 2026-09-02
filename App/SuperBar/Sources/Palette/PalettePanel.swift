@@ -31,6 +31,13 @@ final class PalettePanel: NSPanel {
         onCancel?()
     }
 
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown {
+            Log.palette.debug("keyDown code=\(event.keyCode) chars=\(event.characters ?? "", privacy: .public) mods=\(event.modifierFlags.rawValue) key=\(self.isKeyWindow) firstResponder=\(String(describing: type(of: self.firstResponder)), privacy: .public)")
+        }
+        super.sendEvent(event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if onKeyEquivalent?(event) == true { return true }
         return super.performKeyEquivalent(with: event)

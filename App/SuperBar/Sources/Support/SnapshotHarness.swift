@@ -39,6 +39,10 @@ enum SnapshotHarness {
             return
         }
         let palette = app.palette
+        if let realID = env["SUPERBAR_REAL_APP"] {
+            renderRealApp(app: app, bundleID: realID, env: env, output: output)
+            return
+        }
         // Seed recents so the root screen shows the Recents section.
         let info = AppInfo(pid: 4242, bundleIdentifier: "com.apple.Notes", name: "Notes")
         app.recents.clear()
@@ -80,6 +84,52 @@ enum SnapshotHarness {
     }
 
     #if DEBUG
+    /// Renders the palette with the real menu bar of a running app (needs Accessibility).
+    @MainActor
+    private static func renderRealApp(app: AppDelegate, bundleID: String, env: [String: String], output: String) {
+        guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else { print("app not running: \(bundleID)"); exit(3) }
+        let info = AppInfo(running: running)
+        let palette = app.palette
+        let source = app.menuSource
+        DispatchQueue.global(qos: .userInitiated).async {
+            let start = Date()
+            let result = Result { try source.loadMenuBar(for: info) { _ in } }
+            let elapsed = Date().timeIntervalSince(start)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let roots):
+                    let outcome = RuleEngine.apply(app.preferences.rules, to: roots, app: info)
+                    palette.session.roots = outcome.roots
+                    palette.session.loadState = .ready
+                    print("loaded \(roots.flattened.count) nodes from \(info.name) in \(Int(elapsed * 1000)) ms")
+                case .failure(let error):
+                    palette.session.roots = []
+                    palette.session.loadState = .failed((error as? MenuSourceError) ?? .actionFailed(error.localizedDescription))
+                    print("load failed: \(error)")
+                }
+                palette.session.isTrusted = source.isTrusted
+                palette.session.app = info
+                palette.session.scripts = []
+                palette.session.mode = env["SUPERBAR_MODE"] == "outline" ? .outline : .list
+                if let scopeTitle = env["SUPERBAR_SCOPE"], let node = palette.session.roots.flattened.first(where: { $0.title == scopeTitle && $0.isContainer }) {
+                    palette.session.scope = node
+                }
+                palette.session.query = env["SUPERBAR_QUERY"] ?? ""
+                palette.searchField.stringValue = palette.session.query
+                palette.showForSnapshot(icon: running.icon)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    guard let view = palette.panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(2) }
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    if let data = rep.representation(using: .png, properties: [:]) {
+                        try? data.write(to: URL(fileURLWithPath: output))
+                        print("snapshot written to \(output)")
+                    }
+                    exit(0)
+                }
+            }
+        }
+    }
+
     @MainActor
     private static func renderSettings(app: AppDelegate, tab: SettingsTab, output: String) {
         app.settings.show(tab: tab)

@@ -70,11 +70,24 @@ public final class AXMenuSource: MenuSource, @unchecked Sendable {
                 items.append(walkItem(entry, index: i, path: path, indexPath: indexPath, depth: depth + 1, map: &map))
             }
         }
+        // The Help menu's search field (and similar widgets) show up as an
+        // untitled item owning an empty menu: treat those like separators.
+        if title.isEmpty && depth > 0 && !items.contains(where: { !$0.isSeparator }) {
+            return MenuNode(title: "", path: path, indexPath: indexPath, depth: depth, isEnabled: false, kind: .separator)
+        }
         return MenuNode(title: title, path: path, indexPath: indexPath, depth: depth, isEnabled: enabled, kind: depth == 0 ? .menuBarItem : .submenu, children: items)
     }
 
+    /// "System Settings…, 1 update" → "System Settings…" (the badge count is
+    /// appended to the accessibility title of Apple-menu items).
+    static func cleanedTitle(_ title: String, path: [String]) -> String {
+        guard path.first == "Apple", let range = title.range(of: #", \d+ updates?$"#, options: .regularExpression) else { return title }
+        return String(title[..<range.lowerBound])
+    }
+
     private func walkItem(_ element: AXUIElement, index: Int, path: [String], indexPath: [Int], depth: Int, map: inout [[Int]: AXUIElement]) -> MenuNode {
-        let a = attributes(of: element)
+        var a = attributes(of: element)
+        a.title = AXMenuSource.cleanedTitle(a.title, path: path)
         let ip = indexPath + [index]
         let p = path + [a.title]
         let hasSubmenu = a.childCount > 0
