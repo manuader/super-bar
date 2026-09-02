@@ -193,9 +193,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 switch key {
                 case "hotKey", "hotKeyEnabled", "globalShortcutExcludedApps": self.registerHotKey()
                 case "showMenuBarExtra": self.statusItem.isVisible = self.preferences.showMenuBarExtra
-                case "menuBarRules": self.menuCache.invalidateAll(); self.palette.preferencesDidChange()
+                case "menuBarRules": self.menuCache.invalidateAll(); self.palette.preferencesDidChange(key: key)
                 case "settingsWindowFloats": self.settings.updateLevel()
-                default: self.palette.preferencesDidChange()
+                case "windowOriginXFraction", "windowOriginYFraction", "didOnboard", "browsingMode": break
+                default: self.palette.preferencesDidChange(key: key)
                 }
             }
         })

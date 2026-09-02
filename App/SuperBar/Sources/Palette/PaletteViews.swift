@@ -16,6 +16,11 @@ enum PaletteMetrics {
     static let cornerRadius: CGFloat = 12
     static let selectionRadius: CGFloat = 6
     static let indentation: CGFloat = 16
+    /// Where the disclosure chevron column starts (inside the selection rect).
+    static let chevronX: CGFloat = horizontalInset + 8
+    static let chevronWidth: CGFloat = 16
+    /// Where cell content starts for level 0 (the chevron column plus a gap).
+    static let contentX: CGFloat = chevronX + chevronWidth + 2
 }
 
 /// Everything a row needs to draw itself.
@@ -80,9 +85,17 @@ extension NSImage {
         return image
     }
 
+    private static var symbolCache: [String: NSImage] = [:]
+
+    /// SF Symbol images are comparatively expensive to create; rows are
+    /// configured on every keystroke, so cache them.
     static func symbol(_ name: String, pointSize: CGFloat, weight: NSFont.Weight = .regular) -> NSImage? {
-        NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+        let key = "\(name)/\(pointSize)/\(weight.rawValue)"
+        if let cached = symbolCache[key] { return cached }
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: pointSize, weight: weight))
+        if let image { symbolCache[key] = image }
+        return image
     }
 }
 
@@ -134,7 +147,7 @@ final class SectionHeaderView: NSTableCellView {
     override func layout() {
         super.layout()
         label.sizeToFit()
-        label.frame = NSRect(x: PaletteMetrics.horizontalInset + 8, y: bounds.height - label.frame.height - 3, width: bounds.width - 32, height: label.frame.height)
+        label.frame = NSRect(x: 2, y: bounds.height - label.frame.height - 3, width: bounds.width - 32, height: label.frame.height)
     }
 }
 
@@ -261,9 +274,24 @@ final class MenuRowView: NSTableCellView {
         applyColors()
     }
 
+    /// Cheap update of the ⌘n badge only (used after expand/collapse).
+    func updateQuickIndex(_ index: Int?) {
+        if let index {
+            let text = "⌘\(index)"
+            if quickBadge.isHidden || quickBadge.text != text {
+                quickBadge.text = text
+                quickBadge.isHidden = false
+                needsLayout = true
+            }
+        } else if !quickBadge.isHidden {
+            quickBadge.isHidden = true
+            needsLayout = true
+        }
+    }
+
     override func layout() {
         super.layout()
-        let inset = PaletteMetrics.horizontalInset + 10
+        let inset: CGFloat = 2
         let h = bounds.height
         let iconSize: CGFloat = 20
         iconView.frame = NSRect(x: inset, y: (h - iconSize) / 2, width: iconSize, height: iconSize)
@@ -382,7 +410,7 @@ final class SkeletonRowView: NSTableCellView {
     var seed: Int = 0
 
     override func draw(_ dirtyRect: NSRect) {
-        let inset = PaletteMetrics.horizontalInset + 10
+        let inset: CGFloat = 2
         let widths: [CGFloat] = [0.32, 0.45, 0.28, 0.5, 0.38, 0.42]
         let icon = NSRect(x: inset, y: bounds.midY - 9, width: 18, height: 18)
         barColor.setFill()
@@ -401,7 +429,9 @@ final class PaletteOutlineView: NSOutlineView {
 
     override func frameOfOutlineCell(atRow row: Int) -> NSRect {
         var frame = super.frameOfOutlineCell(atRow: row)
-        frame.origin.x += PaletteMetrics.horizontalInset - 4
+        let level = CGFloat(self.level(forRow: row))
+        frame.origin.x = level * indentationPerLevel + PaletteMetrics.chevronX
+        frame.size.width = PaletteMetrics.chevronWidth
         return frame
     }
 
@@ -409,7 +439,7 @@ final class PaletteOutlineView: NSOutlineView {
         var frame = super.frameOfCell(atColumn: column, row: row)
         let level = CGFloat(self.level(forRow: row))
         // Leave room for the disclosure chevron at every level, consistently.
-        frame.origin.x = level * indentationPerLevel + 14
+        frame.origin.x = level * indentationPerLevel + PaletteMetrics.contentX
         frame.size.width = bounds.width - frame.origin.x
         return frame
     }

@@ -59,11 +59,14 @@ final class MenuCache {
         let gen = (generation[app.pid] ?? 0) + 1
         generation[app.pid] = gen
         let source = self.source
+        // While refreshing an existing snapshot, keep showing it and report only the final result.
+        let streamProgress = entry.snapshot == nil
         queue.async { [weak self] in
             var roots: [MenuNode] = []
             do {
                 let result = try source.loadMenuBar(for: app) { node in
                     roots.append(node)
+                    guard streamProgress else { return }
                     let partial = roots
                     DispatchQueue.main.async { [weak self] in
                         guard let self, self.generation[app.pid] == gen else { return }

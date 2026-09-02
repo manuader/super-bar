@@ -35,6 +35,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     private var style: RowStyle
     private var currentApp: NSRunningApplication?
     private var isProgrammaticMove = false
+    private var isAnimatingFrame = false
+    private var lastRawRoots: [MenuNode]?
     private var isVisible: Bool { panel.isVisible }
     private var pendingSelectionID: String?
     private var lastLoadedPID: Int32?
@@ -137,23 +139,39 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         reload(selectPreferred: false)
     }
 
-    func preferencesDidChange() {
+    /// Applies only what the changed preference affects; a full reload on
+    /// every write (window geometry included) used to cause visible stalls.
+    func preferencesDidChange(key: String? = nil) {
         let prefs = app.preferences
-        theme = ResolvedTheme.current(preferences: prefs, isDarkAppearance: NSApp.effectiveAppearance.isDark)
-        style = RowStyle(theme: theme, textSizeDelta: CGFloat(prefs.rowTextSize.pointDelta), showCountBadge: prefs.showCountBadge, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
-        applyTheme()
-        if abs(panel.frame.width - CGFloat(prefs.windowWidth)) > 1 {
+        switch key {
+        case "windowWidth":
+            guard abs(panel.frame.width - CGFloat(prefs.windowWidth)) > 1 else { return }
             var frame = panel.frame
             frame.size.width = CGFloat(prefs.windowWidth)
             isProgrammaticMove = true
             panel.setFrame(frame, display: true)
             isProgrammaticMove = false
+            if isVisible { position() }
+        case "selectedLightTheme", "selectedDarkTheme", "customThemes", nil:
+            refreshStyle()
+            applyTheme()
+        case "rowTextSize", "showSubtitles", "showCountBadge", "recentsLimit", "menuBarRules", "preferredScreen":
+            refreshStyle()
+            if isVisible { reload(selectPreferred: false) }
+        default:
+            break
         }
-        if isVisible { reload(selectPreferred: false); position() }
+    }
+
+    private func refreshStyle() {
+        let prefs = app.preferences
+        theme = ResolvedTheme.current(preferences: prefs, isDarkAppearance: NSApp.effectiveAppearance.isDark)
+        style = RowStyle(theme: theme, textSizeDelta: CGFloat(prefs.rowTextSize.pointDelta), showCountBadge: prefs.showCountBadge, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
     private func appearanceChanged() {
-        preferencesDidChange()
+        refreshStyle()
+        applyTheme()
     }
 
     // MARK: Data
@@ -161,6 +179,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     private func adopt(_ entry: MenuCache.Entry, for info: AppInfo) {
         lastLoadedPID = info.pid
         let rawRoots = entry.snapshot?.roots ?? entry.partialRoots
+        lastRawRoots = rawRoots
         let outcome = RuleEngine.apply(app.preferences.rules, to: rawRoots, app: info)
         session.roots = outcome.roots
         session.rulesRemovedEverything = outcome.removedEverything
@@ -172,6 +191,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     private func cacheDidUpdate(_ info: AppInfo, _ entry: MenuCache.Entry) {
         guard isVisible, info.pid == currentApp?.processIdentifier else { return }
         let hadRows = !session.roots.isEmpty
+        // A background refresh that produced the same tree needs no work at all.
+        if hadRows, entry.state == .ready, let fresh = entry.snapshot?.roots, fresh == lastRawRoots { return }
         adopt(entry, for: info)
         reload(selectPreferred: !hadRows)
     }
@@ -193,13 +214,21 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         content.rows.forEach(index)
         expanded = content.expanded
         outlineView.reloadData()
-        for id in expanded { if let row = rowsByID[id] { outlineView.expandItem(row) } }
+        expandRows(content.rows)
         assignQuickIndices()
         let target = (selectPreferred ? content.preferredSelection : nil) ?? previous.flatMap { rowsByID[$0] != nil && isRowVisible($0) ? $0 : nil } ?? content.preferredSelection ?? content.firstSelectable()?.id
         if let target, let row = rowsByID[target] { select(row, scroll: true) } else { outlineView.deselectAll(nil) }
         updateFooter()
         updateScopeBar()
         fitHeight()
+    }
+
+    /// Expands parents before children (a Set has no order).
+    private func expandRows(_ rows: [PaletteRow]) {
+        for row in rows where row.isExpandable && expanded.contains(row.id) {
+            outlineView.expandItem(row)
+            expandRows(row.children)
+        }
     }
 
     private func isRowVisible(_ id: String) -> Bool {
@@ -211,14 +240,12 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         var n = 1
         for r in 0..<outlineView.numberOfRows {
             guard let row = outlineView.item(atRow: r) as? PaletteRow else { continue }
-            if row.isSelectable, n <= 9 {
-                row.quickIndex = n
-                n += 1
-            } else {
-                row.quickIndex = nil
-            }
-            if let cell = outlineView.view(atColumn: 0, row: r, makeIfNecessary: false) as? MenuRowView {
-                cell.configure(row: row, style: style, selected: outlineView.isRowSelected(r))
+            let newIndex: Int? = (row.isSelectable && n <= 9) ? n : nil
+            if newIndex != nil { n += 1 }
+            let changed = row.quickIndex != newIndex
+            row.quickIndex = newIndex
+            if changed, let cell = outlineView.view(atColumn: 0, row: r, makeIfNecessary: false) as? MenuRowView {
+                cell.updateQuickIndex(newIndex)
             }
         }
     }
@@ -378,16 +405,17 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     private func toggleExpansion(expand: Bool, recursive: Bool) {
         guard let row = selectedRow() else { return }
+        let target: NSOutlineView = style.reduceMotion ? outlineView : outlineView.animator()
         if expand {
             if row.isExpandable {
-                outlineView.expandItem(row, expandChildren: recursive)
+                target.expandItem(row, expandChildren: recursive)
                 expanded.insert(row.id)
                 if recursive { row.children.forEach(markExpanded) }
                 if !content.isSearching { session.userExpanded.insert(row.id); if recursive { row.children.forEach { session.userExpanded.insert($0.id) } } }
             }
         } else {
             if row.isExpandable && outlineView.isItemExpanded(row) {
-                outlineView.collapseItem(row, collapseChildren: recursive)
+                target.collapseItem(row, collapseChildren: recursive)
                 expanded.remove(row.id)
                 session.userExpanded.remove(row.id)
             } else if let parent = row.parent, parent.isSelectable {
@@ -460,28 +488,49 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         return max(min(h, maxHeight), 120)
     }
 
+    private var targetFrameHeight: CGFloat = 0
+
     private func fitHeight() {
         var frame = panel.frame
         let newHeight = desiredHeight()
-        guard abs(frame.height - newHeight) > 0.5 else { return }
+        guard abs(targetFrameHeight - newHeight) > 0.5 || abs(frame.height - newHeight) > 0.5 else { return }
+        targetFrameHeight = newHeight
         let top = frame.maxY
         frame.size.height = newHeight
         frame.origin.y = top - newHeight
-        isProgrammaticMove = true
-        panel.setFrame(frame, display: true, animate: isVisible && !style.reduceMotion)
-        isProgrammaticMove = false
+        if isVisible && !style.reduceMotion {
+            // Asynchronous Core Animation resize: never blocks typing.
+            isAnimatingFrame = true
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.16
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                context.allowsImplicitAnimation = true
+                panel.animator().setFrame(frame, display: true)
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    // Only clear when no newer animation retargeted the frame.
+                    if abs(self.panel.frame.height - self.targetFrameHeight) < 0.5 { self.isAnimatingFrame = false }
+                }
+            })
+        } else {
+            isProgrammaticMove = true
+            panel.setFrame(frame, display: true)
+            isProgrammaticMove = false
+        }
     }
 
     // MARK: NSWindowDelegate
 
     func windowDidMove(_ notification: Notification) {
-        guard !isProgrammaticMove, isVisible, let screen = panel.screen else { return }
+        guard !isProgrammaticMove, !isAnimatingFrame, isVisible, let screen = panel.screen else { return }
         let visible = screen.visibleFrame
         let frame = panel.frame
-        let xf = (frame.origin.x - visible.minX) / max(visible.width - frame.width, 1)
-        let yf = (visible.maxY - frame.maxY) / max(visible.height, 1)
-        app.preferences.windowOriginXFraction = Double(min(max(xf, 0), 1))
-        app.preferences.windowOriginYFraction = Double(min(max(yf, 0), 0.9))
+        let xf = Double(min(max((frame.origin.x - visible.minX) / max(visible.width - frame.width, 1), 0), 1))
+        let yf = Double(min(max((visible.maxY - frame.maxY) / max(visible.height, 1), 0), 0.9))
+        // Height animations keep the top edge fixed, so only real drags change these.
+        if abs(app.preferences.windowOriginXFraction - xf) > 0.002 { app.preferences.windowOriginXFraction = xf }
+        if abs(app.preferences.windowOriginYFraction - yf) > 0.002 { app.preferences.windowOriginYFraction = yf }
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
@@ -657,9 +706,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         if !theme.usesMaterial {
             modeControl.appearance = theme.appearance
         }
-        outlineView.reloadData()
-        for id in expanded { if let row = rowsByID[id] { outlineView.expandItem(row) } }
-        assignQuickIndices()
+        // Re-render rows with the new colours without losing selection/expansion.
+        if !content.rows.isEmpty { reload(selectPreferred: false) }
         updateScopeBar()
     }
 

@@ -42,6 +42,8 @@ public final class RecentsStore: @unchecked Sendable {
 
     private let lock = NSLock()
     private var entries: [RecentEntry]
+    /// Incremented on every mutation so callers can cache derived data.
+    public private(set) var version = 0
     private let fileURL: URL?
     private var saveWorkItem: DispatchWorkItem?
     private let queue = DispatchQueue(label: "com.manuader.SuperBar.recents", qos: .utility)
@@ -91,6 +93,7 @@ public final class RecentsStore: @unchecked Sendable {
                 entries.remove(at: victim.offset)
             }
         }
+        version += 1
         lock.unlock()
         scheduleSave()
     }
@@ -98,6 +101,7 @@ public final class RecentsStore: @unchecked Sendable {
     public func clear(appKey: String? = nil) {
         lock.lock()
         if let key = appKey { entries.removeAll { $0.appKey == key } } else { entries.removeAll() }
+        version += 1
         lock.unlock()
         scheduleSave()
     }

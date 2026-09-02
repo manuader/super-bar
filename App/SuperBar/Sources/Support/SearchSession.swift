@@ -102,7 +102,9 @@ final class SearchSession {
     let recents: RecentsStore
 
     var app: AppInfo?
-    var roots: [MenuNode] = []
+    var roots: [MenuNode] = [] { didSet { rootsToken &+= 1 } }
+    private var rootsToken = 0
+    private var candidateCache: (token: Int, scope: MenuNodeID?, scripts: [String], recents: Int, mode: BrowsingMode, value: [SearchCandidate<PaletteRow.Kind>])?
     var loadState: MenuCache.State = .idle
     var isTrusted = true
     var rulesRemovedEverything = false
@@ -243,25 +245,38 @@ final class SearchSession {
         return PaletteRow(id: id, kind: .menu(node), ranges: ranges[node.id] ?? [], children: children)
     }
 
+    /// Candidates are expensive to build (folded search text per node), so they
+    /// are cached until the menu tree, scope, scripts or recents change.
+    private func listCandidates() -> [SearchCandidate<PaletteRow.Kind>] {
+        let scriptIDs = scripts.map(\.id)
+        if let cache = candidateCache, cache.token == rootsToken, cache.scope == scope?.id, cache.scripts == scriptIDs, cache.recents == recents.version, cache.mode == mode {
+            return cache.value
+        }
+        let frecency = recents.index(appKey: appKey)
+        var candidates: [SearchCandidate<PaletteRow.Kind>] = []
+        var order = 0
+        let nodes = scopedRoots.flattened
+        candidates.reserveCapacity(nodes.count + scripts.count)
+        for node in nodes {
+            candidates.append(SearchCandidate(payload: .menu(node), title: node.displayTitle, pathText: node.breadcrumb, frecency: frecency.score(titlePath: node.path, indexPath: node.indexPath), originalOrder: order))
+            order += 1
+        }
+        if scope == nil {
+            for s in scripts {
+                candidates.append(SearchCandidate(payload: .script(s), title: s.title, pathText: nil, frecency: frecency.scriptScore(title: s.title), originalOrder: order))
+                order += 1
+            }
+        }
+        candidateCache = (rootsToken, scope?.id, scriptIDs, recents.version, mode, candidates)
+        return candidates
+    }
+
     private func buildSearch() -> PaletteContent {
         let q = FuzzyMatcher.Query(query)
         let applicable = scripts
-        let frecency = recents.index(appKey: appKey)
         switch mode {
         case .list:
-            var candidates: [SearchCandidate<PaletteRow.Kind>] = []
-            var order = 0
-            for node in scopedRoots.flattened where !(scope == nil && node.kind == .menuBarItem && false) {
-                candidates.append(SearchCandidate(payload: .menu(node), title: node.displayTitle, pathText: node.breadcrumb, frecency: frecency.score(titlePath: node.path, indexPath: node.indexPath), originalOrder: order))
-                order += 1
-            }
-            if scope == nil {
-                for s in applicable {
-                    candidates.append(SearchCandidate(payload: .script(s), title: s.title, pathText: nil, frecency: frecency.scriptScore(title: s.title), originalOrder: order))
-                    order += 1
-                }
-            }
-            let hits = ListSearch.search(q, in: candidates)
+            let hits = ListSearch.search(q, in: listCandidates())
             var rows: [PaletteRow] = [PaletteRow(id: "h:search", kind: .header("Search"))]
             for hit in hits {
                 switch hit.payload {
