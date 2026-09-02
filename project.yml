@@ -1,0 +1,129 @@
+name: SuperBar
+options:
+  bundleIdPrefix: com.manuader
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_STRICT_CONCURRENCY: targeted
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: ${CODE_SIGN_IDENTITY}
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    ENABLE_HARDENED_RUNTIME: YES
+    DEAD_CODE_STRIPPING: YES
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: wholemodule
+packages:
+  SuperBarKit:
+    path: Packages/SuperBarKit
+targets:
+  SuperBar:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/SuperBar/Sources
+      - path: App/SuperBar/Resources
+        excludes: ["Info.plist"]
+    dependencies:
+      - package: SuperBarKit
+      - target: superbar-cli
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+    info:
+      path: App/SuperBar/Resources/Info.plist
+      properties:
+        CFBundleName: SuperBar
+        CFBundleDisplayName: SuperBar
+        CFBundleIdentifier: com.manuader.SuperBar
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleIconName: AppIcon
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHumanReadableCopyright: "© 2026 Manu Ader — MIT License"
+        NSPrincipalClass: NSApplication
+        NSUserNotificationsUsageDescription: "SuperBar notifies you when a menu item or script could not be executed."
+        NSAppleEventsUsageDescription: "SuperBar runs your scripts, which may control other applications."
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false
+    entitlements:
+      path: App/SuperBar/Resources/SuperBar.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.automation.apple-events: true
+    settings:
+      base:
+        PRODUCT_NAME: SuperBar
+        PRODUCT_BUNDLE_IDENTIFIER: com.manuader.SuperBar
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSUIElement: YES
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        OTHER_LDFLAGS: "-framework Carbon"
+    scheme:
+      testTargets:
+        - SuperBarTests
+      gatherCoverageData: false
+      environmentVariables:
+        - variable: SUPERBAR_FIXTURE
+          value: "1"
+          isEnabled: false
+  superbar-cli:
+    type: tool
+    platform: macOS
+    sources:
+      - path: App/SuperBarCLI
+    dependencies:
+      - package: SuperBarKit
+    settings:
+      base:
+        PRODUCT_NAME: superbar-cli
+        PRODUCT_BUNDLE_IDENTIFIER: com.manuader.SuperBar.cli
+        SKIP_INSTALL: YES
+  SuperBarTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: App/SuperBarTests
+    dependencies:
+      - target: SuperBar
+      - package: SuperBarKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.manuader.SuperBarTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SuperBar.app/Contents/MacOS/SuperBar"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  SuperBar:
+    build:
+      targets:
+        SuperBar: all
+        superbar-cli: all
+        SuperBarTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - SuperBarTests
+    archive:
+      config: Release

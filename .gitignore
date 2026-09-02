@@ -1,0 +1,26 @@
+# Xcode / build
+*.xcodeproj
+*.xcworkspace
+!*.xcworkspace/contents.xcworkspacedata
+xcuserdata/
+DerivedData/
+build/
+.build/
+*.dSYM
+*.ipa
+*.app.zip
+
+# SwiftPM
+Packages/*/.build/
+Packages/*/.swiftpm/
+.swiftpm/
+Package.resolved
+
+# Local signing overrides
+Local.xcconfig
+
+# macOS
+.DS_Store
+
+# Snapshots produced by the verification harness
+snapshots/
