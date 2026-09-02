@@ -65,20 +65,20 @@ final class MenuCache {
                 let result = try source.loadMenuBar(for: app) { node in
                     roots.append(node)
                     let partial = roots
-                    DispatchQueue.main.async {
+                    DispatchQueue.main.async { [weak self] in
                         guard let self, self.generation[app.pid] == gen else { return }
                         self.entries[app.pid]?.partialRoots = partial
                         if let e = self.entries[app.pid] { self.onUpdate?(app, e) }
                     }
                 }
                 let snapshot = MenuSnapshot(app: app, roots: result)
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation[app.pid] == gen else { return }
                     self.entries[app.pid] = Entry(snapshot: snapshot, state: .ready)
                     self.onUpdate?(app, self.entries[app.pid]!)
                 }
             } catch let error as MenuSourceError {
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation[app.pid] == gen else { return }
                     var e = self.entries[app.pid] ?? Entry(snapshot: nil, state: .idle)
                     e.state = .failed(error)
@@ -86,7 +86,7 @@ final class MenuCache {
                     self.onUpdate?(app, e)
                 }
             } catch {
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation[app.pid] == gen else { return }
                     var e = self.entries[app.pid] ?? Entry(snapshot: nil, state: .idle)
                     e.state = .failed(.actionFailed(error.localizedDescription))

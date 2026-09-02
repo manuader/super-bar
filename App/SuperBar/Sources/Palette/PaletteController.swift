@@ -285,7 +285,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
             if reveal {
                 hide()
                 app.activator.reveal(node, app: info) { [weak self] error in
-                    if let error { self?.app.notify(title: "Couldn’t reveal “\(node.title)”", body: error.localizedDescription) }
+                    guard let error else { return }
+                    MainActor.assumeIsolated { self?.app.notify(title: "Couldn’t reveal “\(node.title)”", body: error.localizedDescription) }
                 }
                 return
             }
@@ -296,15 +297,17 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
             }
             hide()
             app.activator.press(node, app: info, running: currentApp) { [weak self] error in
-                if let error {
+                guard let error else { return }
+                MainActor.assumeIsolated {
                     self?.app.notify(title: "Couldn’t select “\(node.title)”", body: (error as? MenuSourceError)?.message ?? error.localizedDescription)
                 }
             }
         case .script(let script):
             hide()
             app.activator.run(script, app: session.app) { [weak self] result in
-                if !result.isSuccess {
-                    let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !result.isSuccess else { return }
+                let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                MainActor.assumeIsolated {
                     self?.app.notify(title: "“\(script.title)” failed (exit \(result.exitCode))", body: detail.isEmpty ? "The script exited with an error." : detail)
                 }
             }
@@ -338,7 +341,10 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         let query = session.query
         hide()
         app.activator.searchHelp(query: query, app: info) { [weak self] error in
-            if let error { self?.app.notify(title: "Couldn’t open the Help menu", body: (error as? MenuSourceError)?.message ?? error.localizedDescription) }
+            guard let error else { return }
+            MainActor.assumeIsolated {
+                self?.app.notify(title: "Couldn’t open the Help menu", body: (error as? MenuSourceError)?.message ?? error.localizedDescription)
+            }
         }
     }
 
