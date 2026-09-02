@@ -405,6 +405,15 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     private func toggleExpansion(expand: Bool, recursive: Bool) {
         guard let row = selectedRow() else { return }
+        if session.mode == .list {
+            // Flat list: → enters a container's scope, ← leaves the current scope.
+            if expand, let node = row.menuNode, node.isContainer {
+                if node.visibleChildren.isEmpty { NSSound.beep() } else { enterScope(node) }
+            } else if !expand {
+                exitScope()
+            }
+            return
+        }
         let target: NSOutlineView = style.reduceMotion ? outlineView : outlineView.animator()
         if expand {
             if row.isExpandable {
@@ -583,8 +592,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         modeControl.segmentCount = 2
         modeControl.setImage(.symbol("list.bullet", pointSize: 12, weight: .medium), forSegment: 0)
         modeControl.setImage(.symbol("list.bullet.indent", pointSize: 12, weight: .medium), forSegment: 1)
-        modeControl.setToolTip("List mode (⌘L)", forSegment: 0)
-        modeControl.setToolTip("Outline mode (⌘O)", forSegment: 1)
+        modeControl.setToolTip("List mode (⌘L): one flat list ranked by relevance. ↩ or → enters a menu, ⌫ or ← leaves it.", forSegment: 0)
+        modeControl.setToolTip("Outline mode (⌘O): the menu hierarchy as a tree. → and ← expand and collapse; only branches with matches stay open while searching.", forSegment: 1)
         modeControl.segmentStyle = .rounded
         modeControl.trackingMode = .selectOne
         modeControl.controlSize = .small

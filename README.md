@@ -21,7 +21,7 @@ feature-complete, MIT-licensed alternative to [Finbar](https://www.finbarapp.com
 | | |
 |---|---|
 | **Fuzzy search** | fzf-style matcher with match highlighting; deep items are found by their parent too ("Font › Bold"). |
-| **List and outline modes** | One flat list ranked by relevance, or the real menu hierarchy with only the matching branches expanded. Switch with ⌘L / ⌘O; the query is preserved. |
+| **List and outline modes** | *List* (⌘L) is flat: menus are rows you enter with ↩ or → and leave with ⌫ or ←, and search results are one list ranked by relevance with the item's path underneath. *Outline* (⌘O) is the real hierarchy: expand and collapse with → and ←, and while searching only the branches that contain matches stay open. The query is preserved when switching. |
 | **Recents / frecency** | Every item you activate is remembered per app; the root screen lists your favourites and search results are boosted. Dynamic titles ("Undo Typing") keep their history. |
 | **Browse and scope** | Walk menus with → and ←, press ↩ on a submenu to search only inside it, ⌫ on an empty query to go back. |
 | **Quick selection** | ⌘1 … ⌘9 activate the first nine rows; badges are always visible. |
@@ -54,7 +54,7 @@ Requirements: macOS 14 Sonoma or later (tested on Sequoia and Tahoe).
 | ↑ ↓, Tab / ⇧Tab | Move selection |
 | ⌥↑ ⌥↓, Home, End | First / last item |
 | Page Up / Page Down | Move by a page |
-| → / ← | Expand / collapse (⌥ for all levels); ← on a leaf selects its parent |
+| → / ← | Outline: expand / collapse (⌥ for all levels); ← on a leaf selects its parent. List: enter / leave a menu |
 | ↩ | Activate; on a submenu: search inside it |
 | ⌘↩ | Reveal the item in the real menu bar |
 | ⌘1 … ⌘9 | Quick-select |

@@ -183,7 +183,13 @@ final class SearchSession {
         if !source.isEmpty {
             rows.append(PaletteRow(id: "h:menu", kind: .header(scope == nil ? "Menu Items" : scope!.title)))
             for node in source {
-                rows.append(tree(node, ranges: [:], userExpansion: true, expanded: &expanded))
+                switch mode {
+                case .list:
+                    // List mode is flat: containers are entered with ↩ / → (scoping).
+                    rows.append(PaletteRow(id: PaletteRow.menuID(node), kind: .menu(node)))
+                case .outline:
+                    rows.append(tree(node, ranges: [:], userExpansion: true, expanded: &expanded))
+                }
             }
             count += scope == nil ? roots.searchableCount : scope!.flattened.count - 1
         } else if scope != nil {

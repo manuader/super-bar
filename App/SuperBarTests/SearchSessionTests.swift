@@ -84,6 +84,22 @@ final class SearchSessionTests: XCTestCase {
         if case .message(let m) = perm.rows[0].kind { XCTAssertEqual(m.action, .grantAccessibility) } else { XCTFail() }
     }
 
+    func testListModeIsFlatAndOutlineModeIsATree() {
+        let session = makeSession()
+        session.mode = .list
+        let list = session.build()
+        XCTAssertFalse(list.rows.contains { $0.isExpandable })
+        XCTAssertEqual(list.rows.filter { $0.menuNode?.depth == 0 }.count, 8)
+        session.mode = .outline
+        let outline = session.build()
+        XCTAssertTrue(outline.rows.contains { $0.isExpandable })
+        // Inside a scope, list mode shows the children flat.
+        session.mode = .list
+        session.scope = session.roots.flattened.first { $0.title == "Format" }
+        let scoped = session.build()
+        XCTAssertTrue(scoped.rows.dropFirst().allSatisfy { $0.menuNode?.depth == 1 && !$0.isExpandable })
+    }
+
     func testQuickIndicesFollowVisibleOrder() {
         let content = makeSession().build()
         let selectable = content.visibleRows().filter(\.isSelectable)

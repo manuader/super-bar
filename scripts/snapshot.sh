@@ -15,6 +15,7 @@ run() {
 echo "Rendering snapshots into $OUT"
 run root-light          SUPERBAR_APPEARANCE=light
 run root-dark           SUPERBAR_APPEARANCE=dark
+run root-outline        SUPERBAR_APPEARANCE=light SUPERBAR_MODE=outline
 run search-list         SUPERBAR_APPEARANCE=light SUPERBAR_QUERY=bld SUPERBAR_MODE=list
 run search-outline      SUPERBAR_APPEARANCE=light SUPERBAR_QUERY=b SUPERBAR_MODE=outline
 run scoped              SUPERBAR_APPEARANCE=light SUPERBAR_SCOPE=Format SUPERBAR_QUERY=text
