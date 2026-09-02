@@ -20,7 +20,7 @@ final class Activator {
             config.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
         } else {
-            running.activate(options: [.activateIgnoringOtherApps])
+            running.activate()
         }
     }
 

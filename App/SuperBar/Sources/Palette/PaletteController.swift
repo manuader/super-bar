@@ -212,6 +212,10 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     func reload(selectPreferred: Bool) {
         let previous = selectedRow()?.id
         content = session.build()
+        let placeholder = session.isPickingApp ? "Choose an app" : "Search"
+        if searchField.placeholderAttributedString?.string != placeholder {
+            searchField.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
+        }
         rowsByID = [:]
         func index(_ row: PaletteRow) { rowsByID[row.id] = row; row.children.forEach(index) }
         content.rows.forEach(index)
@@ -396,14 +400,12 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         session.runningApps = app.runningAppsForPicker()
         session.isPickingApp = true
         session.scope = nil
-        searchField.placeholderAttributedString = NSAttributedString(string: "Choose an app", attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
         setQuery("")
     }
 
     func exitAppPicker() {
         guard session.isPickingApp else { return }
         session.isPickingApp = false
-        searchField.placeholderAttributedString = NSAttributedString(string: "Search", attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
         setQuery("")
     }
 
@@ -413,7 +415,6 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         currentApp = running
         session.isPickingApp = false
         session.resetSearchState()
-        searchField.placeholderAttributedString = NSAttributedString(string: "Search", attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
         appIconView.image = running.icon ?? NSImage(named: NSImage.applicationIconName)
         let info = AppInfo(running: running)
         session.app = info

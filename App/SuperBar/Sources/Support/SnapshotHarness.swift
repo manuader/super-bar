@@ -128,6 +128,10 @@ enum SnapshotHarness {
                 if let scopeTitle = env["SUPERBAR_SCOPE"], let node = palette.session.roots.flattened.first(where: { $0.title == scopeTitle && $0.isContainer }) {
                     palette.session.scope = node
                 }
+                if env["SUPERBAR_STATE"] == "apppicker" {
+                    palette.session.runningApps = app.runningAppsForPicker()
+                    palette.session.isPickingApp = true
+                }
                 palette.session.query = env["SUPERBAR_QUERY"] ?? ""
                 palette.searchField.stringValue = palette.session.query
                 palette.showForSnapshot(icon: running.icon)
