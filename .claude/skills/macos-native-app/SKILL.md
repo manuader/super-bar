@@ -47,7 +47,9 @@ the Accessibility grant. Prefer a stable identity while iterating.
    types `@MainActor`; keep `MenuNode`/`MenuSnapshot` value types.
 
 ## Debugging
-- `log stream --predicate 'subsystem == "com.manuader.SuperBar"' --level debug`
+- `/usr/bin/log show --last 5m --predicate 'subsystem == "com.manuader.SuperBar"'` for
+  persisted notice lines (show/hide/hot key); `/usr/bin/log stream … --debug` for key
+  presses and queries. Always use the absolute path: zsh has a `log` builtin.
 - Accessibility state: `SuperBar --check-ax` prints trusted status.
 - If the hot key does not fire: another app owns it
   (`RegisterEventHotKey` → `eventHotKeyExistsErr`, shown in Settings).
