@@ -14,6 +14,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     private var effectView: NSVisualEffectView?
     private let headerView = NSView()
     private let appIconView = NSImageView()
+    private let appIconButton = NSButton()
     let searchField = PaletteSearchField()
     private let clearButton = NSButton()
     private let modeControl = NSSegmentedControl()
@@ -122,6 +123,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     private func handleEscape() {
         if !searchField.stringValue.isEmpty {
             setQuery("")
+        } else if session.isPickingApp {
+            exitAppPicker()
         } else {
             hide()
         }
@@ -309,11 +312,14 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     func activate(_ row: PaletteRow, reveal: Bool = false) {
         switch row.kind {
+        case .app(let picked):
+            if let running = NSRunningApplication(processIdentifier: picked.pid) { switchTo(running) } else { NSSound.beep() }
         case .menu(let node):
             guard let info = session.app else { return }
+            let activateFirst = targetNeedsActivation
             if reveal {
                 hide()
-                app.activator.reveal(node, app: info) { [weak self] error in
+                app.activator.reveal(node, app: info, running: activateFirst ? currentApp : nil) { [weak self] error in
                     guard let error else { return }
                     MainActor.assumeIsolated { self?.app.notify(title: "Couldn’t reveal “\(node.title)”", body: error.localizedDescription) }
                 }
@@ -325,7 +331,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
                 return
             }
             hide()
-            app.activator.press(node, app: info, running: currentApp) { [weak self] error in
+            app.activator.press(node, app: info, running: currentApp, activateFirst: activateFirst) { [weak self] error in
                 guard let error else { return }
                 MainActor.assumeIsolated {
                     self?.app.notify(title: "Couldn’t select “\(node.title)”", body: (error as? MenuSourceError)?.message ?? error.localizedDescription)
@@ -368,13 +374,60 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     func searchHelpMenu() {
         guard let info = session.app else { return }
         let query = session.query
+        let running = targetNeedsActivation ? currentApp : nil
         hide()
-        app.activator.searchHelp(query: query, app: info) { [weak self] error in
+        app.activator.searchHelp(query: query, app: info, running: running) { [weak self] error in
             guard let error else { return }
             MainActor.assumeIsolated {
                 self?.app.notify(title: "Couldn’t open the Help menu", body: (error as? MenuSourceError)?.message ?? error.localizedDescription)
             }
         }
+    }
+
+    // MARK: App picker
+
+    @objc private func appIconClicked() { toggleAppPicker() }
+
+    func toggleAppPicker() {
+        if session.isPickingApp { exitAppPicker() } else { enterAppPicker() }
+    }
+
+    func enterAppPicker() {
+        session.runningApps = app.runningAppsForPicker()
+        session.isPickingApp = true
+        session.scope = nil
+        searchField.placeholderAttributedString = NSAttributedString(string: "Choose an app", attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
+        setQuery("")
+    }
+
+    func exitAppPicker() {
+        guard session.isPickingApp else { return }
+        session.isPickingApp = false
+        searchField.placeholderAttributedString = NSAttributedString(string: "Search", attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
+        setQuery("")
+    }
+
+    /// Points the palette at another running application.
+    func switchTo(_ running: NSRunningApplication) {
+        Log.palette.notice("switch to \(running.localizedName ?? "?", privacy: .public) (pid \(running.processIdentifier))")
+        currentApp = running
+        session.isPickingApp = false
+        session.resetSearchState()
+        searchField.placeholderAttributedString = NSAttributedString(string: "Search", attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
+        appIconView.image = running.icon ?? NSImage(named: NSImage.applicationIconName)
+        let info = AppInfo(running: running)
+        session.app = info
+        session.scripts = ScriptsLibrary.items(for: running.bundleIdentifier, in: app.scripts)
+        let entry = app.menuCache.load(app: info)
+        adopt(entry, for: info)
+        setQuery("")
+    }
+
+    /// True when the palette acts on an app other than the frontmost one, so
+    /// actions must bring it forward first (background apps disable items).
+    private var targetNeedsActivation: Bool {
+        guard let current = currentApp else { return false }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier != current.processIdentifier
     }
 
     func enterScope(_ node: MenuNode) {
@@ -580,6 +633,14 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         content.addSubview(headerView)
         appIconView.imageScaling = .scaleProportionallyUpOrDown
         headerView.addSubview(appIconView)
+        appIconButton.isBordered = false
+        appIconButton.title = ""
+        appIconButton.imagePosition = .noImage
+        appIconButton.isTransparent = true
+        appIconButton.target = self
+        appIconButton.action = #selector(appIconClicked)
+        appIconButton.toolTip = "Choose the app to act on (⌫ with an empty search)"
+        headerView.addSubview(appIconButton)
         searchField.delegate = self
         headerView.addSubview(searchField)
         clearButton.isBordered = false
@@ -670,6 +731,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         var y = h - PaletteMetrics.headerHeight
         headerView.frame = NSRect(x: 0, y: y, width: w, height: PaletteMetrics.headerHeight)
         appIconView.frame = NSRect(x: 16, y: (PaletteMetrics.headerHeight - 28) / 2, width: 28, height: 28)
+        appIconButton.frame = appIconView.frame.insetBy(dx: -4, dy: -4)
         optionsButton.frame = NSRect(x: w - 16 - 24, y: (PaletteMetrics.headerHeight - 24) / 2, width: 24, height: 24)
         modeControl.sizeToFit()
         modeControl.frame = NSRect(x: optionsButton.frame.minX - 8 - modeControl.frame.width, y: (PaletteMetrics.headerHeight - modeControl.frame.height) / 2, width: modeControl.frame.width, height: modeControl.frame.height)
@@ -740,7 +802,9 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     }
 
     private func updateFooter() {
-        if let row = selectedRow(), !row.breadcrumb.isEmpty {
+        if session.isPickingApp {
+            breadcrumbLabel.stringValue = selectedRow()?.runningApp?.name ?? "Choose an app"
+        } else if let row = selectedRow(), !row.breadcrumb.isEmpty {
             breadcrumbLabel.stringValue = row.breadcrumb
         } else if let scope = session.scope {
             breadcrumbLabel.stringValue = scope.breadcrumb
@@ -749,7 +813,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         }
         var n = 0
         for r in 0..<outlineView.numberOfRows where (outlineView.item(atRow: r) as? PaletteRow)?.isSelectable == true { n += 1 }
-        countLabel.stringValue = n == 1 ? "1 Item" : "\(n) Items"
+        let noun = session.isPickingApp ? "App" : "Item"
+        countLabel.stringValue = n == 1 ? "1 \(noun)" : "\(n) \(noun)s"
     }
 
     // MARK: Header actions
@@ -772,6 +837,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         add("Activate", #selector(menuActivate), "\r", mods: [])
         add("Reveal Menu Item", #selector(menuReveal), "\r")
         add("Search Help Menu", #selector(menuHelpSearch))
+        add("Choose App…", #selector(menuChooseApp), "\u{08}", mods: [])
         menu.addItem(.separator())
         add("List Mode", #selector(menuListMode), "l")
         add("Outline Mode", #selector(menuOutlineMode), "o")
@@ -790,6 +856,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     @objc private func menuActivate() { activateSelection() }
     @objc private func menuReveal() { activateSelection(reveal: true) }
     @objc private func menuHelpSearch() { searchHelpMenu() }
+    @objc private func menuChooseApp() { toggleAppPicker() }
     @objc private func menuListMode() { setMode(.list) }
     @objc private func menuOutlineMode() { setMode(.outline) }
     @objc private func menuClearRecents() { if let key = session.app?.storageKey { app.recents.clear(appKey: key); reload(selectPreferred: true) } }
@@ -838,7 +905,10 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         case #selector(NSResponder.insertBacktab(_:)):
             moveSelection(by: -1); updateFooter(); return true
         case #selector(NSResponder.deleteBackward(_:)):
-            if searchField.stringValue.isEmpty && session.scope != nil { exitScope(); return true }
+            if searchField.stringValue.isEmpty {
+                if session.scope != nil { exitScope() } else { toggleAppPicker() }
+                return true
+            }
             return false
         case #selector(NSResponder.moveRight(_:)), #selector(NSResponder.moveRightAndModifySelection(_:)):
             let atEnd = textView.selectedRange().location >= (textView.string as NSString).length

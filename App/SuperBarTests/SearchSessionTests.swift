@@ -100,6 +100,28 @@ final class SearchSessionTests: XCTestCase {
         XCTAssertTrue(scoped.rows.dropFirst().allSatisfy { $0.menuNode?.depth == 1 && !$0.isExpandable })
     }
 
+    func testAppPickerListsAppsAndFiltersThem() {
+        let session = makeSession()
+        session.runningApps = [
+            RunningApp(pid: 10, name: "Finder", bundleIdentifier: "com.apple.finder", icon: nil, isFrontmost: true),
+            RunningApp(pid: 1, name: "Notes", bundleIdentifier: "com.apple.Notes", icon: nil, isFrontmost: false),
+            RunningApp(pid: 30, name: "Xcode", bundleIdentifier: "com.apple.dt.Xcode", icon: nil, isFrontmost: false),
+        ]
+        session.isPickingApp = true
+        let all = session.build()
+        XCTAssertEqual(all.rows.compactMap { $0.runningApp?.name }, ["Finder", "Notes", "Xcode"])
+        XCTAssertEqual(all.preferredSelection, "a:1")   // the app currently acted on (pid 1 = Notes)
+        XCTAssertEqual(all.itemCount, 3)
+        session.query = "xc"
+        let filtered = session.build()
+        XCTAssertEqual(filtered.rows.compactMap { $0.runningApp?.name }, ["Xcode"])
+        XCTAssertFalse(filtered.rows[1].ranges.isEmpty)
+        session.query = "zzz"
+        if case .message = session.build().rows[0].kind {} else { XCTFail("expected an empty-state message") }
+        session.resetSearchState()
+        XCTAssertFalse(session.isPickingApp)
+    }
+
     func testQuickIndicesFollowVisibleOrder() {
         let content = makeSession().build()
         let selectable = content.visibleRows().filter(\.isSelectable)

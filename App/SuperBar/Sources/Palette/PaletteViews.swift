@@ -206,11 +206,17 @@ final class MenuRowView: NSTableCellView {
         case .script:
             symbolName = "curlybraces.square"
             subtitle = row.showsSubtitle ? "Scripts" : ""
+        case .app:
+            subtitle = ""
         default:
             break
         }
 
-        iconView.image = .symbol(symbolName, pointSize: 15, weight: .regular)
+        if case .app(let app) = row.kind, let icon = app.icon {
+            iconView.image = icon          // real app icon, not a template symbol
+        } else {
+            iconView.image = .symbol(symbolName, pointSize: 15, weight: .regular)
+        }
         recentOverlay.image = row.isRecent ? .symbol("clock.fill", pointSize: 8, weight: .bold) : nil
         recentOverlay.isHidden = !row.isRecent
 

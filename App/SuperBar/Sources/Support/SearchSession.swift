@@ -1,12 +1,33 @@
 import AppKit
 import SuperBarKit
 
+/// A running application offered by the app picker.
+struct RunningApp: Hashable, Sendable {
+    let pid: pid_t
+    let name: String
+    let bundleIdentifier: String?
+    let icon: NSImage?
+    let isFrontmost: Bool
+
+    static func == (a: RunningApp, b: RunningApp) -> Bool { a.pid == b.pid }
+    func hash(into hasher: inout Hasher) { hasher.combine(pid) }
+
+    init(pid: pid_t, name: String, bundleIdentifier: String?, icon: NSImage?, isFrontmost: Bool) {
+        self.pid = pid; self.name = name; self.bundleIdentifier = bundleIdentifier; self.icon = icon; self.isFrontmost = isFrontmost
+    }
+
+    init(_ app: NSRunningApplication, isFrontmost: Bool) {
+        self.init(pid: app.processIdentifier, name: app.localizedName ?? app.bundleIdentifier ?? "App", bundleIdentifier: app.bundleIdentifier, icon: app.icon, isFrontmost: isFrontmost)
+    }
+}
+
 /// One row of the palette. Reference type so `NSOutlineView` can use it as an item.
 final class PaletteRow {
     enum Kind {
         case header(String)
         case menu(MenuNode)
         case script(ScriptItem)
+        case app(RunningApp)
         case message(Message)
         case skeleton
     }
@@ -49,6 +70,7 @@ final class PaletteRow {
     var message: Message? { if case .message(let m) = kind { return m } else { return nil } }
     var menuNode: MenuNode? { if case .menu(let n) = kind { return n } else { return nil } }
     var scriptItem: ScriptItem? { if case .script(let s) = kind { return s } else { return nil } }
+    var runningApp: RunningApp? { if case .app(let a) = kind { return a } else { return nil } }
     var isExpandable: Bool { !children.isEmpty }
 
     var title: String {
@@ -56,6 +78,7 @@ final class PaletteRow {
         case .header(let t): return t
         case .menu(let n): return n.title
         case .script(let s): return s.title
+        case .app(let a): return a.name
         case .message(let m): return m.title
         case .skeleton: return ""
         }
@@ -65,9 +88,12 @@ final class PaletteRow {
         switch kind {
         case .menu(let n): return n.breadcrumb
         case .script(let s): return "Scripts › \(s.title)"
+        case .app(let a): return a.bundleIdentifier ?? a.name
         default: return ""
         }
     }
+
+    static func appID(_ app: RunningApp) -> String { "a:\(app.pid)" }
 
     static func menuID(_ node: MenuNode) -> String { "m:" + node.id.description }
     static func scriptID(_ item: ScriptItem) -> String { "s:" + item.id }
@@ -112,6 +138,9 @@ final class SearchSession {
     var query = ""
     var mode: BrowsingMode
     var scope: MenuNode?
+    /// App picker: choose which running app the palette acts on.
+    var isPickingApp = false
+    var runningApps: [RunningApp] = []
     /// Containers expanded by the user while browsing (root screen).
     var userExpanded: Set<String> = []
 
@@ -127,11 +156,13 @@ final class SearchSession {
         query = ""
         scope = nil
         userExpanded = []
+        isPickingApp = false
     }
 
     // MARK: Building rows
 
     func build() -> PaletteContent {
+        if isPickingApp { return buildAppPicker() }
         if !isTrusted {
             return message(.init(symbol: "hand.raised.fill", title: "Accessibility access required", subtitle: "SuperBar reads menus through the Accessibility API. Grant access in System Settings to get started.", actionTitle: "Open System Settings", action: .grantAccessibility))
         }
@@ -153,6 +184,28 @@ final class SearchSession {
             }
         }
         return isSearching ? buildSearch() : buildBrowse()
+    }
+
+    /// Running apps, filtered by the query, most recently used first.
+    private func buildAppPicker() -> PaletteContent {
+        let q = FuzzyMatcher.Query(query)
+        var rows: [PaletteRow] = [PaletteRow(id: "h:apps", kind: .header(q.isEmpty ? "Open Apps" : "Apps"))]
+        let currentPID = app?.pid
+        if q.isEmpty {
+            for a in runningApps { rows.append(PaletteRow(id: PaletteRow.appID(a), kind: .app(a))) }
+        } else {
+            let candidates = runningApps.enumerated().map { SearchCandidate(payload: $0.element, title: $0.element.name, pathText: $0.element.bundleIdentifier, originalOrder: $0.offset) }
+            for hit in ListSearch.search(q, in: candidates) {
+                rows.append(PaletteRow(id: PaletteRow.appID(hit.payload), kind: .app(hit.payload), ranges: hit.titleRanges))
+            }
+            if rows.count == 1 {
+                let m = PaletteRow.Message(symbol: "app.dashed", title: "No app matches “\(query)”", subtitle: "Only apps with a menu bar are listed.", actionTitle: nil, action: .none)
+                return PaletteContent(rows: [PaletteRow(id: "x:noapps", kind: .message(m))], expanded: [], preferredSelection: nil, itemCount: 0, isSearching: true)
+            }
+        }
+        // Preselect the app the palette is acting on when not searching.
+        let preferred = q.isEmpty ? rows.first(where: { $0.runningApp?.pid == currentPID })?.id : rows.dropFirst().first?.id
+        return PaletteContent(rows: rows, expanded: [], preferredSelection: preferred, itemCount: rows.count - 1, isSearching: !q.isEmpty)
     }
 
     private func message(_ m: PaletteRow.Message) -> PaletteContent {

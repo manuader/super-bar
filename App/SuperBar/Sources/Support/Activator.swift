@@ -13,10 +13,23 @@ final class Activator {
         self.recents = recents
     }
 
-    func press(_ node: MenuNode, app: AppInfo, running: NSRunningApplication?, completion: @escaping @Sendable (Error?) -> Void) {
+    /// Brings an app to the front (used when the palette targets a background app).
+    static func bringToFront(_ running: NSRunningApplication) {
+        if let url = running.bundleURL {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
+        } else {
+            running.activate(options: [.activateIgnoringOtherApps])
+        }
+    }
+
+    func press(_ node: MenuNode, app: AppInfo, running: NSRunningApplication?, activateFirst: Bool = false, completion: @escaping @Sendable (Error?) -> Void) {
         recents.record(appKey: app.storageKey, titlePath: node.path, indexPath: node.indexPath)
         let source = self.source
-        queue.async {
+        if activateFirst, let running { Activator.bringToFront(running) }
+        let delay: TimeInterval = activateFirst ? 0.25 : 0
+        queue.asyncAfter(deadline: .now() + delay) {
             do {
                 try source.press(node, in: app)
                 DispatchQueue.main.async { completion(nil) }
@@ -37,10 +50,11 @@ final class Activator {
         }
     }
 
-    func reveal(_ node: MenuNode, app: AppInfo, completion: @escaping @Sendable (Error?) -> Void) {
+    func reveal(_ node: MenuNode, app: AppInfo, running: NSRunningApplication? = nil, completion: @escaping @Sendable (Error?) -> Void) {
         let source = self.source
+        if let running { Activator.bringToFront(running) }
         // Opening a menu can block until it closes; keep the serial action queue free.
-        DispatchQueue.global(qos: .userInteractive).async {
+        DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + (running == nil ? 0 : 0.3)) {
             do {
                 try source.reveal(node, in: app)
                 DispatchQueue.main.async { completion(nil) }
@@ -50,9 +64,10 @@ final class Activator {
         }
     }
 
-    func searchHelp(query: String, app: AppInfo, completion: @escaping @Sendable (Error?) -> Void) {
+    func searchHelp(query: String, app: AppInfo, running: NSRunningApplication? = nil, completion: @escaping @Sendable (Error?) -> Void) {
         let source = self.source
-        queue.async {
+        if let running { Activator.bringToFront(running) }
+        queue.asyncAfter(deadline: .now() + (running == nil ? 0 : 0.3)) {
             do {
                 try source.searchHelpMenu(query: query, in: app)
                 DispatchQueue.main.async { completion(nil) }

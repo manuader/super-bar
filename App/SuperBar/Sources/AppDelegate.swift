@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     /// The application that was frontmost before SuperBar's own windows.
     private(set) var lastFrontmostApp: NSRunningApplication?
+    /// Most recently activated apps first (for the app picker).
+    private var activationOrder: [pid_t] = []
     private var observers: [Any] = []
 
     static var isRunningTests: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
@@ -169,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             MainActor.assumeIsolated {
                 if app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
                     self.lastFrontmostApp = app
+                    self.activationOrder.removeAll { $0 == app.processIdentifier }
+                    self.activationOrder.insert(app.processIdentifier, at: 0)
                     self.palette.frontmostAppChanged(app)
                 }
                 if self.preferences.hotKeyEnabled {
@@ -212,6 +216,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func showSettings(tab: SettingsTab? = nil) {
         settings.show(tab: tab)
+    }
+
+    /// Regular apps with a menu bar, most recently used first, then by name.
+    func runningAppsForPicker() -> [RunningApp] {
+        let me = ProcessInfo.processInfo.processIdentifier
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != me }
+        func rank(_ app: NSRunningApplication) -> Int { activationOrder.firstIndex(of: app.processIdentifier) ?? Int.max }
+        return apps.sorted { a, b in
+            let ra = rank(a), rb = rank(b)
+            if ra != rb { return ra < rb }
+            return (a.localizedName ?? "").localizedCaseInsensitiveCompare(b.localizedName ?? "") == .orderedAscending
+        }.map { RunningApp($0, isFrontmost: $0.processIdentifier == front) }
     }
 
     /// Target application for the palette: the frontmost app that is not us.

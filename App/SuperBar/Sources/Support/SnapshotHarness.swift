@@ -67,6 +67,15 @@ enum SnapshotHarness {
         if let scopeTitle = env["SUPERBAR_SCOPE"], let node = roots.flattened.first(where: { $0.title == scopeTitle && $0.isContainer }) {
             palette.session.scope = node
         }
+        if env["SUPERBAR_STATE"] == "apppicker" {
+            let sample: [(String, String)] = [("Notes", "com.apple.Notes"), ("Finder", "com.apple.finder"), ("Safari", "com.apple.Safari"), ("Xcode", "com.apple.dt.Xcode"), ("Mail", "com.apple.mail"), ("Music", "com.apple.Music")]
+            palette.session.runningApps = sample.enumerated().map { i, entry in
+                let path = NSWorkspace.shared.urlForApplication(withBundleIdentifier: entry.1)?.path ?? "/System/Applications/\(entry.0).app"
+                return RunningApp(pid: pid_t(1000 + i), name: entry.0, bundleIdentifier: entry.1, icon: NSWorkspace.shared.icon(forFile: path), isFrontmost: i == 0)
+            }
+            palette.session.app = AppInfo(pid: 1000, bundleIdentifier: "com.apple.Notes", name: "Notes")
+            palette.session.isPickingApp = true
+        }
         palette.session.query = env["SUPERBAR_QUERY"] ?? ""
         palette.searchField.stringValue = palette.session.query
         palette.showForSnapshot(icon: NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app"))
