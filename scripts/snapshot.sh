@@ -21,6 +21,9 @@ run search-outline      SUPERBAR_APPEARANCE=light SUPERBAR_QUERY=b SUPERBAR_MODE
 run scoped              SUPERBAR_APPEARANCE=light SUPERBAR_SCOPE=Format SUPERBAR_QUERY=text
 run no-results          SUPERBAR_APPEARANCE=light SUPERBAR_QUERY=zzzz
 run permission          SUPERBAR_APPEARANCE=light SUPERBAR_STATE=permission
+run open-command        SUPERBAR_APPEARANCE=light SUPERBAR_STATE=open
+run open-command-dark   SUPERBAR_APPEARANCE=dark SUPERBAR_STATE=open
+run open-with           SUPERBAR_APPEARANCE=light SUPERBAR_STATE=openwith
 run app-picker          SUPERBAR_APPEARANCE=light SUPERBAR_STATE=apppicker
 run app-picker-search   SUPERBAR_APPEARANCE=dark SUPERBAR_STATE=apppicker SUPERBAR_QUERY=xc
 run busy                SUPERBAR_APPEARANCE=dark SUPERBAR_STATE=busy

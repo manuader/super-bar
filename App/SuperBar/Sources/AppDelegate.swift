@@ -10,9 +10,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let scriptsRoot = ScriptsLibrary.defaultRoot(bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.manuader.SuperBar")
     @Published private(set) var scripts: [ScriptItem] = []
     @Published private(set) var hotKeyRegistrationError: String?
+    @Published private(set) var fileIndexSummary = "Not indexed yet"
     private var scriptsWatcher: ScriptsWatcher?
 
     lazy var menuCache = MenuCache(source: menuSource)
+    lazy var fileIndex: FileIndexService = {
+        let service = FileIndexService(preferences: preferences,
+                                       heatFileURL: isTransient ? nil : WorkspaceHeat.defaultFileURL(),
+                                       cacheURL: isTransient ? nil : FileIndexService.cacheURL)
+        service.onChange = { [weak self] in
+            guard let self else { return }
+            self.fileIndexSummary = self.describeFileIndex()
+            self.palette.fileIndexDidChange()
+        }
+        return service
+    }()
+    lazy var opener = Opener()
     lazy var activator = Activator(source: menuSource, recents: recents)
     lazy var palette = PaletteController(app: self)
     lazy var settings = SettingsWindowController(app: self)
@@ -27,6 +40,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var observers: [Any] = []
 
     static var isRunningTests: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
+    /// Harness, diagnostics and test instances must not touch the user's data.
+    var isTransient: Bool { SnapshotHarness.isEnabled || AppDelegate.isRunningTests || Diagnostics.isEnabled }
+
+    private func describeFileIndex() -> String {
+        switch fileIndex.state {
+        case .idle: return "Not indexed yet"
+        case .indexing: return "Indexing…"
+        case .unavailable(let reason): return reason
+        case .ready:
+            let snapshot = fileIndex.snapshot
+            let folders = snapshot.directories.count, files = snapshot.files.count
+            return "\(folders.formatted()) folders and \(files.formatted()) files indexed"
+        }
+    }
 
     override init() {
         let env = ProcessInfo.processInfo.environment
@@ -66,6 +93,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if SnapshotHarness.isEnabled {
             SnapshotHarness.run(app: self)
             return
+        }
+        // Index in the background a moment after launch: reading Desktop,
+        // Documents and Downloads can prompt for permission, and a prompt that
+        // steals focus while the palette is open would dismiss it.
+        if preferences.openCommandEnabled {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.fileIndex.activate() }
         }
         if !menuSource.isTrusted {
             showPermissionWindow()

@@ -43,12 +43,24 @@ final class PaletteRow {
         case menu(MenuNode)
         case script(ScriptItem)
         case app(RunningApp)
+        case file(FileEntry)
+        case handler(AppHandler)
+        case command(Command)
         case message(Message)
         case skeleton
     }
 
+    /// A palette command typed as a word, currently just `open`.
+    struct Command: Hashable {
+        var keyword: String
+        var title: String
+        var subtitle: String
+        var symbol: String
+        static let open = Command(keyword: "open", title: "Open…", subtitle: "Search folders and files, then open them", symbol: "folder")
+    }
+
     struct Message {
-        enum Action { case grantAccessibility, retry, searchHelp, openRules, none }
+        enum Action { case grantAccessibility, retry, searchHelp, openRules, rebuildIndex, openFileSettings, none }
         var symbol: String
         var title: String
         var subtitle: String?
@@ -86,6 +98,9 @@ final class PaletteRow {
     var menuNode: MenuNode? { if case .menu(let n) = kind { return n } else { return nil } }
     var scriptItem: ScriptItem? { if case .script(let s) = kind { return s } else { return nil } }
     var runningApp: RunningApp? { if case .app(let a) = kind { return a } else { return nil } }
+    var fileEntry: FileEntry? { if case .file(let f) = kind { return f } else { return nil } }
+    var appHandler: AppHandler? { if case .handler(let h) = kind { return h } else { return nil } }
+    var command: Command? { if case .command(let c) = kind { return c } else { return nil } }
     var isExpandable: Bool { !children.isEmpty }
 
     var title: String {
@@ -94,6 +109,9 @@ final class PaletteRow {
         case .menu(let n): return n.title
         case .script(let s): return s.title
         case .app(let a): return a.name
+        case .file(let f): return f.name
+        case .handler(let h): return h.name
+        case .command(let c): return c.title
         case .message(let m): return m.title
         case .skeleton: return ""
         }
@@ -104,11 +122,16 @@ final class PaletteRow {
         case .menu(let n): return n.breadcrumb
         case .script(let s): return "Scripts › \(s.title)"
         case .app(let a): return a.bundleIdentifier ?? a.name
+        case .file(let f): return FileEntry.abbreviate(f.path)
+        case .handler(let h): return h.url?.path ?? ""
+        case .command(let c): return c.subtitle
         default: return ""
         }
     }
 
     static func appID(_ app: RunningApp) -> String { "a:\(app.pid)" }
+    static func fileID(_ entry: FileEntry) -> String { "f:" + entry.path }
+    static func handlerID(_ handler: AppHandler) -> String { "w:" + (handler.url?.path ?? "browse") }
 
     static func menuID(_ node: MenuNode) -> String { "m:" + node.id.description }
     static func scriptID(_ item: ScriptItem) -> String { "s:" + item.id }
@@ -156,6 +179,13 @@ final class SearchSession {
     /// App picker: choose which running app the palette acts on.
     var isPickingApp = false
     var runningApps: [RunningApp] = []
+    /// `open` command: file search results, kept in sync by the controller.
+    var fileResults: FileIndexSnapshot.Results?
+    var fileResultsQuery: String?
+    var fileIndexState: FileIndexService.State = .idle
+    /// Set while asking which app should open a file of this type.
+    var pendingFile: FileEntry?
+    var handlerCandidates: [AppHandler] = []
     /// Containers expanded by the user while browsing (root screen).
     var userExpanded: Set<String> = []
 
@@ -167,17 +197,43 @@ final class SearchSession {
 
     var isSearching: Bool { !FuzzyMatcher.Query(query).isEmpty }
 
+    // MARK: The `open` command
+
+    static let openKeyword = "open"
+
+    /// The text after `open `, or nil when the palette is not in open mode.
+    var openQuery: String? {
+        guard preferences.openCommandEnabled else { return nil }
+        let prefix = SearchSession.openKeyword + " "
+        guard query.count >= prefix.count,
+              query.prefix(prefix.count).lowercased() == prefix else { return nil }
+        return String(query.dropFirst(prefix.count))
+    }
+
+    var isOpenMode: Bool { openQuery != nil }
+    /// True while the user has typed a prefix of `open` but not the space yet.
+    var suggestsOpenCommand: Bool {
+        guard preferences.openCommandEnabled, !query.isEmpty, openQuery == nil, pendingFile == nil else { return false }
+        return SearchSession.openKeyword.hasPrefix(query.lowercased())
+    }
+
     func resetSearchState() {
         query = ""
         scope = nil
         userExpanded = []
         isPickingApp = false
+        pendingFile = nil
+        handlerCandidates = []
+        fileResults = nil
+        fileResultsQuery = nil
     }
 
     // MARK: Building rows
 
     func build() -> PaletteContent {
+        if pendingFile != nil { return buildHandlerPicker() }
         if isPickingApp { return buildAppPicker() }
+        if let openQuery { return buildOpen(openQuery) }
         if !isTrusted {
             return message(.init(symbol: "hand.raised.fill", title: "Accessibility access required", subtitle: "SuperBar reads menus through the Accessibility API. Grant access in System Settings to get started.", actionTitle: "Open System Settings", action: .grantAccessibility))
         }
@@ -221,6 +277,63 @@ final class SearchSession {
         // Preselect the app the palette is acting on when not searching.
         let preferred = q.isEmpty ? rows.first(where: { $0.runningApp?.pid == currentPID })?.id : rows.dropFirst().first?.id
         return PaletteContent(rows: rows, expanded: [], preferredSelection: preferred, itemCount: rows.count - 1, isSearching: !q.isEmpty)
+    }
+
+    /// Folders first, then files, exactly as typed after `open `.
+    private func buildOpen(_ text: String) -> PaletteContent {
+        var rows: [PaletteRow] = []
+        var count = 0
+        let subtitles = true
+        // Results for the previous keystroke stay on screen until the new ones
+        // arrive (a few milliseconds later), which avoids flicker while typing.
+        let results = fileResults
+
+        if let results, !results.isEmpty {
+            if !results.directories.isEmpty {
+                rows.append(PaletteRow(id: "h:folders", kind: .header("Folders")))
+                for hit in results.directories {
+                    rows.append(PaletteRow(id: PaletteRow.fileID(hit.entry), kind: .file(hit.entry), ranges: hit.range.map { [$0] } ?? [], showsSubtitle: subtitles))
+                }
+                count += results.directories.count
+            }
+            if !results.files.isEmpty {
+                rows.append(PaletteRow(id: "h:files", kind: .header("Files")))
+                for hit in results.files {
+                    rows.append(PaletteRow(id: PaletteRow.fileID(hit.entry), kind: .file(hit.entry), ranges: hit.range.map { [$0] } ?? [], showsSubtitle: subtitles))
+                }
+                count += results.files.count
+            }
+            let preferred = rows.first(where: { $0.isSelectable })?.id
+            return PaletteContent(rows: rows, expanded: [], preferredSelection: preferred, itemCount: count, isSearching: true)
+        }
+
+        switch fileIndexState {
+        case .idle, .indexing:
+            let skeletons = (0..<5).map { PaletteRow(id: "skeleton\($0)", kind: .skeleton) }
+            return PaletteContent(rows: [PaletteRow(id: "h:folders", kind: .header("Indexing your folders…"))] + skeletons, expanded: [], preferredSelection: nil, itemCount: 0, isSearching: true)
+        case .unavailable(let reason):
+            let m = PaletteRow.Message(symbol: "folder.badge.questionmark", title: "Nothing to search", subtitle: reason, actionTitle: "Rebuild Index", action: .rebuildIndex)
+            return PaletteContent(rows: [PaletteRow(id: "x:noindex", kind: .message(m))], expanded: [], preferredSelection: nil, itemCount: 0, isSearching: true)
+        case .ready:
+            if text.trimmingCharacters(in: .whitespaces).isEmpty {
+                let m = PaletteRow.Message(symbol: "folder", title: "Open a folder or file", subtitle: "Type part of a name. Folders are listed first, then files.", actionTitle: nil, action: .none)
+                return PaletteContent(rows: [PaletteRow(id: "x:openhint", kind: .message(m))], expanded: [], preferredSelection: nil, itemCount: 0, isSearching: true)
+            }
+            let m = PaletteRow.Message(symbol: "magnifyingglass", title: "No folder or file matches “\(text)”", subtitle: "Only indexed folders are searched. Add more in Settings › Open.", actionTitle: "Open Settings", action: .openFileSettings)
+            return PaletteContent(rows: [PaletteRow(id: "x:nofiles", kind: .message(m))], expanded: [], preferredSelection: nil, itemCount: 0, isSearching: true)
+        }
+    }
+
+    /// Which app should open this kind of file, asked once per file type.
+    private func buildHandlerPicker() -> PaletteContent {
+        guard let file = pendingFile else { return message(.init(symbol: "questionmark", title: "Nothing to open", subtitle: nil, actionTitle: nil, action: .none)) }
+        let type = FileTypeHandlers.key(for: file.path)
+        let title = type.isEmpty ? "Open “\(file.name)” with" : "Open .\(type) files with"
+        var rows: [PaletteRow] = [PaletteRow(id: "h:handlers", kind: .header(title))]
+        for handler in handlerCandidates {
+            rows.append(PaletteRow(id: PaletteRow.handlerID(handler), kind: .handler(handler), showsSubtitle: false))
+        }
+        return PaletteContent(rows: rows, expanded: [], preferredSelection: rows.dropFirst().first?.id, itemCount: handlerCandidates.count, isSearching: false)
     }
 
     private func message(_ m: PaletteRow.Message) -> PaletteContent {
@@ -351,7 +464,12 @@ final class SearchSession {
         switch mode {
         case .list:
             let hits = ListSearch.search(q, in: listCandidates())
-            var rows: [PaletteRow] = [PaletteRow(id: "h:search", kind: .header("Search"))]
+            var rows: [PaletteRow] = []
+            if suggestsOpenCommand {
+                rows.append(PaletteRow(id: "h:commands", kind: .header("Command")))
+                rows.append(PaletteRow(id: "c:open", kind: .command(.open), showsSubtitle: true))
+            }
+            rows.append(PaletteRow(id: "h:search", kind: .header("Search")))
             for hit in hits {
                 switch hit.payload {
                 case .menu(let node):
@@ -361,8 +479,9 @@ final class SearchSession {
                 default: break
                 }
             }
-            if hits.isEmpty { return noResults() }
-            return PaletteContent(rows: rows, expanded: [], preferredSelection: rows.dropFirst().first?.id, itemCount: hits.count, isSearching: true)
+            if hits.isEmpty && !suggestsOpenCommand { return noResults() }
+            let preferred = rows.first(where: { $0.isSelectable })?.id
+            return PaletteContent(rows: rows, expanded: [], preferredSelection: preferred, itemCount: hits.count, isSearching: true)
         case .outline:
             let result = OutlineSearch.search(q, in: scopedRoots)
             var expanded = Set<String>()
@@ -373,6 +492,10 @@ final class SearchSession {
                     rows.append(tree(node, ranges: result.ranges, userExpansion: false, expanded: &expanded))
                 }
                 for id in result.expanded { expanded.insert("m:" + id.description) }
+            }
+            if suggestsOpenCommand {
+                rows.insert(PaletteRow(id: "c:open", kind: .command(.open), showsSubtitle: true), at: 0)
+                rows.insert(PaletteRow(id: "h:commands", kind: .header("Command")), at: 0)
             }
             var scriptHits: [PaletteRow] = []
             if scope == nil {

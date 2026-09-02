@@ -26,6 +26,21 @@ public enum RowTextSize: Int, Codable, CaseIterable, Sendable {
     }
 }
 
+/// How a folder chosen with the `open` command is shown in Finder.
+public enum FolderOpenBehavior: Int, Codable, CaseIterable, Sendable {
+    case newTab = 0
+    case newWindow = 1
+    case reuseWindow = 2
+
+    public var title: String {
+        switch self {
+        case .newTab: return "New Finder tab"
+        case .newWindow: return "New Finder window"
+        case .reuseWindow: return "Reuse the front window"
+        }
+    }
+}
+
 public struct HotKey: Codable, Hashable, Sendable {
     public var keyCode: UInt32
     /// Carbon modifier mask (cmdKey 256, shiftKey 512, optionKey 2048, controlKey 4096).
@@ -71,6 +86,19 @@ public final class Preferences: ObservableObject {
     @Stored("windowOriginXFraction", default: 0.5) public var windowOriginXFraction: Double
     @Stored("windowOriginYFraction", default: 0.22) public var windowOriginYFraction: Double
     @Stored("settingsWindowFloats", default: false) public var settingsWindowFloats: Bool
+
+    // MARK: Open command
+    @Stored("openCommandEnabled", default: true) public var openCommandEnabled: Bool
+    @Stored("folderOpenBehavior", default: FolderOpenBehavior.newTab) public var folderOpenBehavior: FolderOpenBehavior
+    @Stored("fileTypeHandlers", default: FileTypeHandlers()) public var fileTypeHandlers: FileTypeHandlers
+    @Stored("fileIndexExtraRoots", default: [String]()) public var fileIndexExtraRoots: [String]
+    @Stored("fileIndexIncludesHidden", default: false) public var fileIndexIncludesHidden: Bool
+    /// Empty means "use the built-in list"; otherwise this text replaces it.
+    @Stored("fileIndexIgnoreList", default: "") public var fileIndexIgnoreList: String
+
+    public var effectiveIgnoreList: IgnoreList {
+        fileIndexIgnoreList.isEmpty ? .default : IgnoreList(text: fileIndexIgnoreList)
+    }
 
     // MARK: Behaviour
     @Stored("browsingMode", default: BrowsingMode.list) public var browsingMode: BrowsingMode

@@ -64,8 +64,31 @@ open -n -a build/DerivedData/Build/Products/Debug/SuperBar.app \
   --env SUPERBAR_DIAG_REVEAL=com.apple.finder:2.0  --env SUPERBAR_DIAG_HELP=com.apple.finder:tags
   --env "SUPERBAR_DIAG_E2E=bring all to front"                          # drives the installed app
 ```
+  --env SUPERBAR_DIAG_INDEX=1                                            # crawl + search benchmark
+  --env SUPERBAR_DIAG_OPEN=/path/to/folder                               # checks Finder really opens a tab
+
 Wait for `<dir>/done`, then read `summary.txt`. Real-menu palette PNGs:
 `--env SUPERBAR_SNAPSHOT=/tmp/x.png --env SUPERBAR_REAL_APP=com.apple.finder`.
+
+## The file index (`open` command)
+- Storage is columnar (`FileTable`): folded name bytes in one flat buffer plus
+  parallel mask/offset/length/heat arrays. Never put per-entry arrays back into
+  `FileEntry` — that cost 1.4 s per search over 200k entries instead of 8 ms.
+- Crawl with `contentsOfDirectory(at:includingPropertiesForKeys:)`, never
+  `fileExists(atPath:isDirectory:)` per child: bulk resource keys took the real
+  crawl from 10.8 s to 0.38 s.
+- `.skipsHiddenFiles` does not exclude `.DS_Store`; check the dot prefix too.
+- Heat propagates from an opened path up its ancestors (halved per level), and
+  the crawl depth is derived from heat. That is what makes a rarely used
+  subfolder of a hot project findable.
+- Searching runs on the index queue and delivers to the main actor with a
+  generation token; the palette shows the previous results until the new ones
+  land, which avoids flicker.
+
+## Driving the app with synthetic keys
+Create the event source with `.privateState` and set `event.flags = []`.
+With `.combinedSessionState` the modifiers of the hot key leak into later
+events, so "o" arrives as ⌃O and triggers an editing shortcut instead of text.
 
 ## Verification before claiming done
 `make test && make build && make snapshot`, then look at the PNGs.

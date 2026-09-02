@@ -122,6 +122,96 @@ final class SearchSessionTests: XCTestCase {
         XCTAssertFalse(session.isPickingApp)
     }
 
+    // MARK: The `open` command
+
+    private func openResults(_ session: SearchSession, query: String, folders: [String], files: [String]) {
+        let snapshot = FileIndexSnapshot(
+            directories: folders.map { FileEntry(path: $0, isDirectory: true, depth: 2) },
+            files: files.map { FileEntry(path: $0, isDirectory: false, depth: 3) })
+        session.query = "open " + query
+        session.fileIndexState = .ready
+        session.fileResults = snapshot.search(FileQuery(query))
+        session.fileResultsQuery = query
+    }
+
+    func testOpenPrefixIsDetectedCaseInsensitively() {
+        let session = makeSession()
+        session.query = "open notes"
+        XCTAssertEqual(session.openQuery, "notes")
+        session.query = "OPEN Notes"
+        XCTAssertEqual(session.openQuery, "Notes")
+        session.query = "open "
+        XCTAssertEqual(session.openQuery, "")
+        session.query = "opened"                 // a menu item, not the command
+        XCTAssertNil(session.openQuery)
+        session.query = "open"
+        XCTAssertNil(session.openQuery)
+        XCTAssertTrue(session.suggestsOpenCommand)
+        session.preferences.openCommandEnabled = false
+        session.query = "open notes"
+        XCTAssertNil(session.openQuery)
+    }
+
+    func testOpenListsFoldersBeforeFiles() throws {
+        let session = makeSession()
+        openResults(session, query: "super",
+                    folders: ["/Users/x/Projects/super-bar", "/Users/x/superb"],
+                    files: ["/Users/x/Projects/super-bar/README.md", "/Users/x/super.txt"])
+        let content = session.build()
+        let headers = content.rows.compactMap { row -> String? in if case .header(let t) = row.kind { return t } else { return nil } }
+        XCTAssertEqual(headers, ["Folders", "Files"])
+        let names = content.rows.compactMap { $0.fileEntry?.name }
+        XCTAssertEqual(names.prefix(2).map { $0 }, ["superb", "super-bar"])
+        XCTAssertTrue(names.contains("super.txt"))
+        XCTAssertEqual(content.itemCount, 3)
+        // The first folder is preselected and its match is highlighted.
+        XCTAssertEqual(content.preferredSelection, content.rows[1].id)
+        XCTAssertFalse(content.rows[1].ranges.isEmpty)
+    }
+
+    func testOpenWithoutMatchesOffersSettings() throws {
+        let session = makeSession()
+        openResults(session, query: "zzzz", folders: [], files: [])
+        let content = session.build()
+        let message = try XCTUnwrap(content.rows.first?.message)
+        XCTAssertEqual(message.action, .openFileSettings)
+    }
+
+    func testOpenShowsSkeletonWhileIndexing() {
+        let session = makeSession()
+        session.query = "open src"
+        session.fileIndexState = .indexing
+        let content = session.build()
+        XCTAssertTrue(content.rows.contains { if case .skeleton = $0.kind { return true } else { return false } })
+    }
+
+    func testTypingOpenSuggestsTheCommandRow() throws {
+        let session = makeSession()
+        session.query = "op"
+        let content = session.build()
+        let command = try XCTUnwrap(content.rows.first { $0.command != nil })
+        XCTAssertEqual(command.command?.keyword, "open")
+        XCTAssertEqual(content.preferredSelection, command.id)
+    }
+
+    func testHandlerPickerListsCandidatesForTheFileType() throws {
+        let session = makeSession()
+        let file = FileEntry(path: "/Users/x/report.pdf", isDirectory: false, depth: 2)
+        session.pendingFile = file
+        session.handlerCandidates = [
+            AppHandler(url: URL(fileURLWithPath: "/System/Applications/Preview.app"), isSystemDefault: true),
+            AppHandler(url: URL(fileURLWithPath: "/Applications/Safari.app"), isSystemDefault: false),
+            .browse,
+        ]
+        let content = session.build()
+        if case .header(let title) = content.rows[0].kind { XCTAssertEqual(title, "Open .pdf files with") } else { XCTFail() }
+        XCTAssertEqual(content.rows.compactMap { $0.appHandler?.name }.last, "Choose Another App…")
+        XCTAssertEqual(content.preferredSelection, content.rows[1].id)
+        XCTAssertTrue(content.rows[1].appHandler?.isSystemDefault ?? false)
+        session.resetSearchState()
+        XCTAssertNil(session.pendingFile)
+    }
+
     func testQuickIndicesFollowVisibleOrder() {
         let content = makeSession().build()
         let selectable = content.visibleRows().filter(\.isSelectable)

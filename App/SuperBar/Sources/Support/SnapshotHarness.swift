@@ -67,6 +67,43 @@ enum SnapshotHarness {
         if let scopeTitle = env["SUPERBAR_SCOPE"], let node = roots.flattened.first(where: { $0.title == scopeTitle && $0.isContainer }) {
             palette.session.scope = node
         }
+        if env["SUPERBAR_STATE"] == "open" || env["SUPERBAR_STATE"] == "openwith" {
+            let home = NSHomeDirectory()
+            let folders = ["Projects/super-bar", "Projects/super-bar/Sources", "Projects/super-bar/Sources/Palette",
+                           "Documents/Superblock", "Downloads/super-assets"].map { home + "/" + $0 }
+            let files = ["Projects/super-bar/README.md", "Projects/super-bar/project.yml",
+                         "Documents/Superblock/notes.md", "Downloads/super-assets/logo.png",
+                         "Projects/super-bar/Sources/SuperBar.swift"].map { home + "/" + $0 }
+            let snapshot = FileIndexSnapshot(
+                directories: folders.map { FileEntry(path: $0, isDirectory: true, depth: 2) },
+                files: files.map { FileEntry(path: $0, isDirectory: false, depth: 3) },
+                heat: [home + "/Projects/super-bar": 300])
+            let query = env["SUPERBAR_QUERY"] ?? "super"
+            palette.session.fileIndexState = .ready
+            palette.session.fileResults = snapshot.search(FileQuery(query))
+            palette.session.fileResultsQuery = query
+            palette.session.query = "open " + query
+            palette.searchField.stringValue = palette.session.query
+            if env["SUPERBAR_STATE"] == "openwith" {
+                // A real file on disk so the system reports real handlers.
+                let sample = FileManager.default.temporaryDirectory.appendingPathComponent("superbar-sample.md")
+                try? "# SuperBar".write(to: sample, atomically: true, encoding: .utf8)
+                let file = FileEntry(path: sample.path, isDirectory: false, depth: 3)
+                palette.session.pendingFile = file
+                palette.session.handlerCandidates = app.opener.handlers(for: file.url)
+            }
+            palette.showForSnapshot(icon: NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app"))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard let view = palette.panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(2) }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                if let data = rep.representation(using: .png, properties: [:]) {
+                    try? data.write(to: URL(fileURLWithPath: output))
+                    print("snapshot written to \(output)")
+                }
+                exit(0)
+            }
+            return
+        }
         if env["SUPERBAR_STATE"] == "apppicker" {
             let sample: [(String, String)] = [("Notes", "com.apple.Notes"), ("Finder", "com.apple.finder"), ("Safari", "com.apple.Safari"), ("Xcode", "com.apple.dt.Xcode"), ("Mail", "com.apple.mail"), ("Music", "com.apple.Music")]
             palette.session.runningApps = sample.enumerated().map { i, entry in
@@ -128,7 +165,44 @@ enum SnapshotHarness {
                 if let scopeTitle = env["SUPERBAR_SCOPE"], let node = palette.session.roots.flattened.first(where: { $0.title == scopeTitle && $0.isContainer }) {
                     palette.session.scope = node
                 }
-                if env["SUPERBAR_STATE"] == "apppicker" {
+                if env["SUPERBAR_STATE"] == "open" || env["SUPERBAR_STATE"] == "openwith" {
+            let home = NSHomeDirectory()
+            let folders = ["Projects/super-bar", "Projects/super-bar/Sources", "Projects/super-bar/Sources/Palette",
+                           "Documents/Superblock", "Downloads/super-assets"].map { home + "/" + $0 }
+            let files = ["Projects/super-bar/README.md", "Projects/super-bar/project.yml",
+                         "Documents/Superblock/notes.md", "Downloads/super-assets/logo.png",
+                         "Projects/super-bar/Sources/SuperBar.swift"].map { home + "/" + $0 }
+            let snapshot = FileIndexSnapshot(
+                directories: folders.map { FileEntry(path: $0, isDirectory: true, depth: 2) },
+                files: files.map { FileEntry(path: $0, isDirectory: false, depth: 3) },
+                heat: [home + "/Projects/super-bar": 300])
+            let query = env["SUPERBAR_QUERY"] ?? "super"
+            palette.session.fileIndexState = .ready
+            palette.session.fileResults = snapshot.search(FileQuery(query))
+            palette.session.fileResultsQuery = query
+            palette.session.query = "open " + query
+            palette.searchField.stringValue = palette.session.query
+            if env["SUPERBAR_STATE"] == "openwith" {
+                // A real file on disk so the system reports real handlers.
+                let sample = FileManager.default.temporaryDirectory.appendingPathComponent("superbar-sample.md")
+                try? "# SuperBar".write(to: sample, atomically: true, encoding: .utf8)
+                let file = FileEntry(path: sample.path, isDirectory: false, depth: 3)
+                palette.session.pendingFile = file
+                palette.session.handlerCandidates = app.opener.handlers(for: file.url)
+            }
+            palette.showForSnapshot(icon: NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app"))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard let view = palette.panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(2) }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                if let data = rep.representation(using: .png, properties: [:]) {
+                    try? data.write(to: URL(fileURLWithPath: output))
+                    print("snapshot written to \(output)")
+                }
+                exit(0)
+            }
+            return
+        }
+        if env["SUPERBAR_STATE"] == "apppicker" {
                     palette.session.runningApps = app.runningAppsForPicker()
                     palette.session.isPickingApp = true
                 }

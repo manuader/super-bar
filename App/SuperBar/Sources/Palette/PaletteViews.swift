@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import SuperBarKit
 
 // MARK: - Metrics
@@ -70,6 +71,29 @@ final class BadgeView: NSView {
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
         let size = (text as NSString).size(withAttributes: attrs)
         (text as NSString).draw(at: NSPoint(x: x, y: (bounds.height - size.height) / 2), withAttributes: attrs)
+    }
+}
+
+/// Real Finder icons, cached per file type: one lookup per extension, then
+/// rasterised so rows never wait on IconServices.
+enum FileIcons {
+    private static var cache: [String: NSImage] = [:]
+
+    static func icon(for entry: FileEntry) -> NSImage? {
+        let key = entry.isDirectory ? ":folder" : (entry.path as NSString).pathExtension.lowercased()
+        if let cached = cache[key] { return cached }
+        let workspace = NSWorkspace.shared
+        let raw: NSImage
+        if entry.isDirectory {
+            raw = workspace.icon(for: .folder)
+        } else if let type = UTType(filenameExtension: key) {
+            raw = workspace.icon(for: type)
+        } else {
+            raw = workspace.icon(for: .data)
+        }
+        let image = RunningApp.rasterize(raw, size: 32) ?? raw
+        cache[key] = image
+        return image
     }
 }
 
@@ -163,6 +187,7 @@ final class MenuRowView: NSTableCellView {
     private let quickBadge = BadgeView()
 
     private var style: RowStyle?
+    private var usesRealIcon = false
     private var showsSubtitle = false
     private var isDisabled = false
     private var isSelectedRow = false
@@ -188,6 +213,7 @@ final class MenuRowView: NSTableCellView {
         isDisabled = false
         var subtitle = ""
         var count: Int? = nil
+        var badgeText: String? = nil
         var key: String? = nil
         var mark: String? = nil
         var title = row.title
@@ -208,13 +234,32 @@ final class MenuRowView: NSTableCellView {
             subtitle = row.showsSubtitle ? "Scripts" : ""
         case .app:
             subtitle = ""
+        case .file(let entry):
+            subtitle = row.showsSubtitle ? entry.displayParent : ""
+            symbolName = entry.isDirectory ? "folder" : "doc"
+        case .handler(let handler):
+            subtitle = ""
+            symbolName = handler.isBrowse ? "ellipsis.circle" : "app"
+            badgeText = handler.isSystemDefault ? "Default" : nil
+        case .command(let command):
+            subtitle = row.showsSubtitle ? command.subtitle : ""
+            symbolName = command.symbol
         default:
             break
         }
 
-        if case .app(let app) = row.kind, let icon = app.icon {
-            iconView.image = icon          // real app icon, not a template symbol
-        } else {
+        usesRealIcon = false
+        switch row.kind {
+        case .app(let app) where app.icon != nil:
+            iconView.image = app.icon      // real app icon, not a template symbol
+            usesRealIcon = true
+        case .handler(let handler) where handler.icon != nil && !handler.isBrowse:
+            iconView.image = handler.icon
+            usesRealIcon = true
+        case .file(let entry):
+            iconView.image = FileIcons.icon(for: entry)
+            usesRealIcon = true
+        default:
             iconView.image = .symbol(symbolName, pointSize: 15, weight: .regular)
         }
         recentOverlay.image = row.isRecent ? .symbol("clock.fill", pointSize: 8, weight: .bold) : nil
@@ -225,7 +270,10 @@ final class MenuRowView: NSTableCellView {
         subtitleLabel.font = style.subtitleFont
         subtitleLabel.isHidden = subtitle.isEmpty
 
-        if let count, style.showCountBadge {
+        if let badgeText {
+            countBadge.text = badgeText
+            countBadge.isHidden = false
+        } else if let count, style.showCountBadge {
             countBadge.text = String(count)
             countBadge.isHidden = false
         } else {
@@ -259,7 +307,7 @@ final class MenuRowView: NSTableCellView {
         let theme = style.theme
         let selected = isSelectedRow
         let text = titleColor
-        iconView.contentTintColor = selected ? theme.selectionText : theme.accent
+        iconView.contentTintColor = usesRealIcon ? nil : (selected ? theme.selectionText : theme.accent)
         recentOverlay.contentTintColor = selected ? theme.selectionText : theme.secondaryText
         subtitleLabel.textColor = selected ? theme.selectionText.withAlphaComponent(0.8) : theme.secondaryText
         titleLabel.attributedStringValue = MenuRowView.recolor(titleLabel.attributedStringValue, color: text)
@@ -269,7 +317,7 @@ final class MenuRowView: NSTableCellView {
         keyBadge.fillColor = badgeFill; keyBadge.textColor = badgeText
         quickBadge.fillColor = selected ? theme.selectionText.withAlphaComponent(0.22) : theme.accent.withAlphaComponent(0.16)
         quickBadge.textColor = selected ? theme.selectionText : theme.accent
-        if isDisabled && !selected {
+        if isDisabled && !selected && !usesRealIcon {
             iconView.contentTintColor = theme.accent.withAlphaComponent(0.4)
         }
     }

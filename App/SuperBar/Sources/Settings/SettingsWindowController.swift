@@ -3,7 +3,7 @@ import SwiftUI
 import SuperBarKit
 
 enum SettingsTab: Int, CaseIterable {
-    case general, appearance, rules, scripts, about
+    case general, appearance, rules, scripts, open, about
 
     var title: String {
         switch self {
@@ -11,6 +11,7 @@ enum SettingsTab: Int, CaseIterable {
         case .appearance: return "Appearance"
         case .rules: return "Rules"
         case .scripts: return "Scripts"
+        case .open: return "Open"
         case .about: return "About"
         }
     }
@@ -21,6 +22,7 @@ enum SettingsTab: Int, CaseIterable {
         case .appearance: return "paintpalette"
         case .rules: return "line.3.horizontal.decrease.circle"
         case .scripts: return "curlybraces"
+        case .open: return "folder"
         case .about: return "info.circle"
         }
     }
@@ -63,6 +65,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case .appearance: return 600
         case .rules: return 420
         case .scripts: return 440
+        case .open: return 620
         case .about: return 360
         }
     }
@@ -74,6 +77,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case .appearance: AppearanceSettingsView().environmentObject(app.preferences)
         case .rules: RulesSettingsView(app: app).environmentObject(app.preferences)
         case .scripts: ScriptsSettingsView(app: app).environmentObject(app.preferences)
+        case .open: OpenSettingsView(app: app).environmentObject(app.preferences)
         case .about: AboutSettingsView()
         }
     }

@@ -30,6 +30,7 @@ feature-complete, MIT-licensed alternative to [Finbar](https://www.finbarapp.com
 | **Rules** | The standard macOS rule editor excludes items (and everything inside them) by title, path, index, depth, app name or bundle identifier. Regular expressions supported. |
 | **Scripts** | Shell scripts and AppleScript files in `~/Library/Application Scripts/com.manuader.SuperBar/` become palette items, globally or per app. The folder is watched. |
 | **Themes** | System Light/Dark (translucent, follows your accent colour), Catppuccin, Dracula, Gruvbox, Solarized Dark/Light, Monokai, plus a custom theme editor. Separate light and dark choices. |
+| **Open command** | Type `open ` followed by part of a name to find folders and files anywhere you work. Folders are listed first and open in a new Finder tab; files open with the app you choose the first time, remembered per file type. |
 | **Fallback search** | No results? One click searches the app's own Help menu. |
 | **Native** | Non-activating floating panel, SF Symbols, system materials, Reduce Motion aware, appears over full-screen apps, multi-display aware. |
 | **CLI** | `superbar-cli list --predicate '…'` and `superbar-cli select 3 1` for automation tools. |
@@ -58,12 +59,56 @@ Requirements: macOS 14 Sonoma or later (tested on Sequoia and Tahoe).
 | ↩ | Activate; on a submenu: search inside it |
 | ⌘↩ | Reveal the item in the real menu bar |
 | ⌘1 … ⌘9 | Quick-select |
+| ⌥↩ | Open a file with a different app (and remember it) |
 | ⌫ (empty query) | Leave the current scope |
 | Esc | Clear the query, then close |
 | ⌘L / ⌘O | List / outline mode |
 | ⌘F | Focus the search field |
 | ⌘, | Settings |
 | ⌘W / ⌘H | Close |
+
+## The `open` command
+
+Type `open ` in the palette, then part of a folder or file name:
+
+```
+open super-bar
+```
+
+Matching **folders** come first and open in a new Finder tab (configurable in
+Settings › Open: new tab, new window, or reuse the front window). **Files**
+follow. The first time you open a kind of file, SuperBar asks which app should
+handle it and remembers the choice for that extension; press ⌥↩ on a file to
+pick a different one, and manage the list in Settings › Open.
+
+### How it stays fast
+
+SuperBar indexes the folders you actually work in rather than the whole disk:
+
+- Opening something adds heat to its **entire folder chain**, halved at each
+  level up, so working inside `~/Projects/app/src` warms `src`, `app` and
+  `Projects`.
+- Hot folders are crawled deeply (up to ten levels), warm ones four, and the
+  rest stay shallow. A rarely visited subfolder of a project you use every day
+  is therefore indexed and instantly findable, while a project you never touch
+  costs nothing.
+- Heat halves every two weeks, so the index follows you as your work moves.
+- Names are stored in flat byte arrays with a 32-bit character mask per entry;
+  a query is rejected by a single AND for the vast majority of entries. A
+  search over 200 000 paths takes about 8 ms, and a typical index of ~10 000
+  takes well under a millisecond. Searching runs off the main thread, so
+  typing never waits for it.
+- Dependency and build folders are skipped entirely, so `node_modules`, `Pods`,
+  `DerivedData`, `.venv`, `target` and friends never reach your results. The
+  list is editable in Settings › Open and follows `.gitignore` syntax: a bare
+  name matches anywhere, a trailing slash means folders only, `*` globs, a
+  leading slash pins one exact location, and `!` puts something back.
+- The index is written to `~/Library/Application Support/SuperBar/file-index.txt`
+  and reloaded at launch, then refreshed in the background and kept current
+  with file-system events.
+
+The first crawl reads Desktop, Documents and Downloads, so macOS asks for
+permission once, shortly after launch.
 
 ## Rules
 
@@ -130,7 +175,8 @@ build is ad-hoc signed and the grant has to be renewed after each build.
 
 ```
 Packages/SuperBarKit    logic: menu model, Accessibility source, fuzzy search,
-                        frecency, rules, scripts, themes, preferences (+ tests)
+                        frecency, rules, scripts, themes, preferences, and the
+                        file index (crawler, workspace heat, matcher) (+ tests)
 App/SuperBar            AppKit palette, SwiftUI settings, hot keys, status item
 App/SuperBarCLI         superbar-cli
 App/SuperBarTests       app-level tests (search session)

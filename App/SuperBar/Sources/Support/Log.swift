@@ -8,4 +8,5 @@ enum Log {
     static let palette = Logger(subsystem: "com.manuader.SuperBar", category: "palette")
     static let menus = Logger(subsystem: "com.manuader.SuperBar", category: "menus")
     static let hotkey = Logger(subsystem: "com.manuader.SuperBar", category: "hotkey")
+    static let files = Logger(subsystem: "com.manuader.SuperBar", category: "files")
 }

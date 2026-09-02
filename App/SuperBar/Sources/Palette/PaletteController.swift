@@ -93,6 +93,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         searchField.stringValue = session.query
         updateClearButton()
         modeControl.selectedSegment = session.mode == .list ? 0 : 1
+        if session.openQuery != nil { updateFileResults() }
         reload(selectPreferred: true)
         position()
         panel.makeKeyAndOrderFront(nil)
@@ -123,7 +124,9 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     }
 
     private func handleEscape() {
-        if !searchField.stringValue.isEmpty {
+        if session.pendingFile != nil {
+            cancelHandlerPicker()
+        } else if !searchField.stringValue.isEmpty {
             setQuery("")
         } else if session.isPickingApp {
             exitAppPicker()
@@ -134,7 +137,12 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     func frontmostAppChanged(_ running: NSRunningApplication) {
         // While visible, the panel follows the front app (e.g. the user ⌘-tabbed).
-        guard isVisible, running.processIdentifier != currentApp?.processIdentifier else { return }
+        // Agents and system prompts are ignored: a permission dialog taking
+        // focus must not retarget the palette or discard what was typed.
+        guard isVisible, running.activationPolicy == .regular,
+              running.processIdentifier != currentApp?.processIdentifier else { return }
+        // The open command and the pickers are not tied to the target app.
+        guard session.openQuery == nil, !session.isPickingApp, session.pendingFile == nil else { return }
         show()
     }
 
@@ -214,7 +222,10 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     func reload(selectPreferred: Bool) {
         let previous = selectedRow()?.id
         content = session.build()
-        let placeholder = session.isPickingApp ? "Choose an app" : "Search"
+        let placeholder: String
+        if session.pendingFile != nil { placeholder = "Choose an app" }
+        else if session.isPickingApp { placeholder = "Choose an app" }
+        else { placeholder = "Search" }
         if searchField.placeholderAttributedString?.string != placeholder {
             searchField.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
         }
@@ -243,7 +254,15 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     /// The app icon while acting on an app; a neutral "apps" glyph while choosing one.
     private func updateHeaderIcon() {
-        if session.isPickingApp {
+        if let file = session.pendingFile {
+            appIconView.image = FileIcons.icon(for: file)
+            appIconView.contentTintColor = nil
+            appIconButton.toolTip = "Choose which app opens this kind of file"
+        } else if session.openQuery != nil {
+            appIconView.image = .symbol("folder.fill", pointSize: 20, weight: .medium)
+            appIconView.contentTintColor = theme.accent
+            appIconButton.toolTip = "Open a folder or file"
+        } else if session.isPickingApp {
             appIconView.image = .symbol("square.grid.2x2.fill", pointSize: 20, weight: .medium)
             appIconView.contentTintColor = theme.secondaryText
             appIconButton.toolTip = "Back to the current app (Esc)"
@@ -322,16 +341,29 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     // MARK: Actions
 
-    func activateSelection(reveal: Bool = false) {
+    func activateSelection(reveal: Bool = false, openWith: Bool = false) {
         if let row = selectedRow() {
-            activate(row, reveal: reveal)
+            activate(row, reveal: reveal, openWith: openWith)
         } else if let message = content.rows.first?.message, message.actionTitle != nil {
             perform(message.action)
         }
     }
 
-    func activate(_ row: PaletteRow, reveal: Bool = false) {
+    func activate(_ row: PaletteRow, reveal: Bool = false, openWith: Bool = false) {
         switch row.kind {
+        case .command(let command):
+            setQuery(command.keyword + " ")
+        case .file(let entry):
+            if entry.isDirectory {
+                openFolder(entry)
+            } else if let choice = app.preferences.fileTypeHandlers.choice(for: entry.path), !openWith {
+                open(entry, with: choice)
+            } else {
+                askForHandler(entry)
+            }
+        case .handler(let handler):
+            guard let file = session.pendingFile else { return }
+            useHandler(handler, for: file)
         case .app(let picked):
             if let running = NSRunningApplication(processIdentifier: picked.pid) { switchTo(running) } else { NSSound.beep() }
         case .menu(let node):
@@ -386,6 +418,13 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         case .openRules:
             hide()
             app.showSettings(tab: .rules)
+        case .rebuildIndex:
+            app.fileIndex.rebuild()
+            session.fileIndexState = app.fileIndex.state
+            reload(selectPreferred: false)
+        case .openFileSettings:
+            hide()
+            app.showSettings(tab: .open)
         case .none:
             break
         }
@@ -401,6 +440,100 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
             MainActor.assumeIsolated {
                 self?.app.notify(title: "Couldn’t open the Help menu", body: (error as? MenuSourceError)?.message ?? error.localizedDescription)
             }
+        }
+    }
+
+    // MARK: The `open` command
+
+    /// Kicks off a background file search for the current `open` query.
+    func updateFileResults() {
+        guard let text = session.openQuery else { return }
+        app.fileIndex.activate()
+        session.fileIndexState = app.fileIndex.state
+        app.fileIndex.search(text) { [weak self] query, results in
+            guard let self, self.session.openQuery == query else { return }
+            self.session.fileResults = results
+            self.session.fileResultsQuery = query
+            self.session.fileIndexState = self.app.fileIndex.state
+            self.reload(selectPreferred: true)
+        }
+    }
+
+    /// The index finished (re)building: refresh what is on screen.
+    func fileIndexDidChange() {
+        guard isVisible, session.openQuery != nil else { return }
+        session.fileIndexState = app.fileIndex.state
+        updateFileResults()
+    }
+
+    /// Asks which application should open this kind of file.
+    private func askForHandler(_ entry: FileEntry) {
+        session.pendingFile = entry
+        session.handlerCandidates = app.opener.handlers(for: entry.url)
+        reload(selectPreferred: true)
+    }
+
+    private func cancelHandlerPicker() {
+        guard session.pendingFile != nil else { return }
+        session.pendingFile = nil
+        session.handlerCandidates = []
+        reload(selectPreferred: true)
+    }
+
+    /// Remembers the choice for this file type and opens the file with it.
+    private func useHandler(_ handler: AppHandler, for entry: FileEntry) {
+        if handler.isBrowse {
+            browseForApplication(entry)
+            return
+        }
+        var handlers = app.preferences.fileTypeHandlers
+        handlers.set(handler.choice ?? .systemDefault, for: entry.path)
+        app.preferences.fileTypeHandlers = handlers
+        session.pendingFile = nil
+        session.handlerCandidates = []
+        open(entry, with: handler.choice)
+    }
+
+    /// "Choose Another App…": a standard open panel restricted to applications.
+    private func browseForApplication(_ entry: FileEntry) {
+        hide(reason: "browse for app")
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose the application that should open \(FileTypeHandlers.describe(FileTypeHandlers.key(for: entry.path)))."
+        guard panel.runModal() == .OK, let url = panel.url else {
+            session.pendingFile = nil
+            session.handlerCandidates = []
+            return
+        }
+        let handler = AppHandler(url: url, isSystemDefault: false)
+        var handlers = app.preferences.fileTypeHandlers
+        handlers.set(handler.choice ?? .systemDefault, for: entry.path)
+        app.preferences.fileTypeHandlers = handlers
+        session.pendingFile = nil
+        session.handlerCandidates = []
+        open(entry, with: handler.choice)
+    }
+
+    private func open(_ entry: FileEntry, with choice: FileHandlerChoice?) {
+        hide(reason: "open file")
+        app.fileIndex.record(entry)
+        app.opener.openFile(entry.url, choice: choice) { [weak self] error in
+            guard let error else { return }
+            self?.app.notify(title: "Couldn’t open “\(entry.name)”", body: error.localizedDescription)
+        }
+    }
+
+    private func openFolder(_ entry: FileEntry) {
+        hide(reason: "open folder")
+        app.fileIndex.record(entry)
+        app.opener.openFolder(entry.url, behavior: app.preferences.folderOpenBehavior) { [weak self] error in
+            guard let error else { return }
+            self?.app.notify(title: "Opened “\(entry.name)”", body: error.localizedDescription)
         }
     }
 
@@ -819,7 +952,9 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     }
 
     private func updateFooter() {
-        if session.isPickingApp {
+        if session.pendingFile != nil {
+            breadcrumbLabel.stringValue = session.pendingFile.map { FileEntry.abbreviate($0.path) } ?? ""
+        } else if session.isPickingApp {
             breadcrumbLabel.stringValue = selectedRow()?.runningApp?.name ?? "Choose an app"
         } else if let row = selectedRow(), !row.breadcrumb.isEmpty {
             breadcrumbLabel.stringValue = row.breadcrumb
@@ -830,7 +965,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         }
         var n = 0
         for r in 0..<outlineView.numberOfRows where (outlineView.item(atRow: r) as? PaletteRow)?.isSelectable == true { n += 1 }
-        let noun = session.isPickingApp ? "App" : "Item"
+        let noun = (session.isPickingApp || session.pendingFile != nil) ? "App" : "Item"
         countLabel.stringValue = n == 1 ? "1 \(noun)" : "\(n) \(noun)s"
     }
 
@@ -855,6 +990,10 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         add("Reveal Menu Item", #selector(menuReveal), "\r")
         add("Search Help Menu", #selector(menuHelpSearch))
         add("Choose App…", #selector(menuChooseApp), "\u{08}", mods: [])
+        add("Open Folder or File…", #selector(menuOpenCommand))
+        if selectedRow()?.fileEntry?.isDirectory == false {
+            add("Open With…", #selector(menuOpenWith), "\r", mods: [.option])
+        }
         menu.addItem(.separator())
         add("List Mode", #selector(menuListMode), "l")
         add("Outline Mode", #selector(menuOutlineMode), "o")
@@ -874,6 +1013,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     @objc private func menuReveal() { activateSelection(reveal: true) }
     @objc private func menuHelpSearch() { searchHelpMenu() }
     @objc private func menuChooseApp() { toggleAppPicker() }
+    @objc private func menuOpenCommand() { setQuery(SearchSession.openKeyword + " ") }
+    @objc private func menuOpenWith() { activateSelection(openWith: true) }
     @objc private func menuListMode() { setMode(.list) }
     @objc private func menuOutlineMode() { setMode(.outline) }
     @objc private func menuClearRecents() { if let key = session.app?.storageKey { app.recents.clear(appKey: key); reload(selectPreferred: true) } }
@@ -898,6 +1039,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         Log.palette.debug("query=\(self.searchField.stringValue, privacy: .public)")
         session.query = searchField.stringValue
         updateClearButton()
+        if session.openQuery != nil { updateFileResults() }
         reload(selectPreferred: true)
     }
 
@@ -914,7 +1056,12 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         case #selector(NSResponder.scrollPageUp(_:)), #selector(NSResponder.pageUp(_:)): pageSelection(down: false); updateFooter(); return true
         case #selector(NSResponder.scrollPageDown(_:)), #selector(NSResponder.pageDown(_:)): pageSelection(down: true); updateFooter(); return true
         case #selector(NSResponder.insertNewline(_:)):
-            activateSelection(reveal: flags.contains(.command)); return true
+            activateSelection(reveal: flags.contains(.command), openWith: flags.contains(.option)); return true
+        case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+            // ⌥↩ opens with a different app; the same selector arrives for ⌃O,
+            // which must not activate anything.
+            if flags.contains(.option) { activateSelection(openWith: true) }
+            return true
         case #selector(NSResponder.cancelOperation(_:)):
             handleEscape(); return true
         case #selector(NSResponder.insertTab(_:)):
