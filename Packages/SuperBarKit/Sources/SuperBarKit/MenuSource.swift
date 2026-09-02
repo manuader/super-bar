@@ -21,7 +21,7 @@ public enum MenuSourceError: Error, Equatable, Sendable {
 /// Provides menu trees and performs actions on them. Implementations: the
 /// Accessibility-backed `AXMenuSource` and the deterministic
 /// `FixtureMenuSource` used by tests and the snapshot harness.
-public protocol MenuSource: AnyObject {
+public protocol MenuSource: AnyObject, Sendable {
     /// Whether the process may read other apps' menus.
     var isTrusted: Bool { get }
     /// Synchronously loads the menu bar. Called from a background queue.
@@ -37,7 +37,7 @@ public protocol MenuSource: AnyObject {
 
 /// A menu tree built from a compact description. Used by unit tests and by
 /// the visual snapshot harness (no Accessibility permission required).
-public final class FixtureMenuSource: MenuSource {
+public final class FixtureMenuSource: MenuSource, @unchecked Sendable {
     public var isTrusted: Bool = true
     public private(set) var pressed: [MenuNodeID] = []
     public private(set) var revealed: [MenuNodeID] = []

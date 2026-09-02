@@ -13,7 +13,7 @@ final class Activator {
         self.recents = recents
     }
 
-    func press(_ node: MenuNode, app: AppInfo, running: NSRunningApplication?, completion: @escaping (Error?) -> Void) {
+    func press(_ node: MenuNode, app: AppInfo, running: NSRunningApplication?, completion: @escaping @Sendable (Error?) -> Void) {
         recents.record(appKey: app.storageKey, titlePath: node.path, indexPath: node.indexPath)
         let source = self.source
         queue.async {
@@ -37,7 +37,7 @@ final class Activator {
         }
     }
 
-    func reveal(_ node: MenuNode, app: AppInfo, completion: @escaping (Error?) -> Void) {
+    func reveal(_ node: MenuNode, app: AppInfo, completion: @escaping @Sendable (Error?) -> Void) {
         let source = self.source
         // Opening a menu can block until it closes; keep the serial action queue free.
         DispatchQueue.global(qos: .userInteractive).async {
@@ -50,7 +50,7 @@ final class Activator {
         }
     }
 
-    func searchHelp(query: String, app: AppInfo, completion: @escaping (Error?) -> Void) {
+    func searchHelp(query: String, app: AppInfo, completion: @escaping @Sendable (Error?) -> Void) {
         let source = self.source
         queue.async {
             do {
@@ -62,7 +62,7 @@ final class Activator {
         }
     }
 
-    func run(_ script: ScriptItem, app: AppInfo?, completion: @escaping (ScriptRunner.Result) -> Void) {
+    func run(_ script: ScriptItem, app: AppInfo?, completion: @escaping @Sendable (ScriptRunner.Result) -> Void) {
         if let app { recents.record(appKey: app.storageKey, titlePath: [script.title], indexPath: [], isScript: true) }
         ScriptRunner.run(script, app: app) { result in
             Task { @MainActor in completion(result) }

@@ -4,7 +4,7 @@ import CoreGraphics
 
 /// Reads and drives application menus through the Accessibility API.
 /// All methods are synchronous and must be called off the main thread.
-public final class AXMenuSource: MenuSource {
+public final class AXMenuSource: MenuSource, @unchecked Sendable {
     public static let messagingTimeout: Float = 1.5
 
     private let lock = NSLock()
