@@ -37,6 +37,8 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
     private var currentApp: NSRunningApplication?
     private var isProgrammaticMove = false
     private var isAnimatingFrame = false
+    /// Icon of the app the palette acts on; the header shows a neutral glyph while picking an app.
+    private var currentAppIcon: NSImage?
     private var lastRawRoots: [MenuNode]?
     private var isVisible: Bool { panel.isVisible }
     private var pendingSelectionID: String?
@@ -77,7 +79,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         }
         session.mode = app.preferences.browsingMode
         session.scripts = ScriptsLibrary.items(for: target?.bundleIdentifier, in: app.scripts)
-        appIconView.image = target?.icon ?? NSImage(named: NSImage.applicationIconName)
+        currentAppIcon = target?.icon ?? NSImage(named: NSImage.applicationIconName)
         if let target {
             let info = AppInfo(running: target)
             session.app = info
@@ -106,7 +108,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
 
     /// Used by the snapshot harness: session state is pre-filled by the caller.
     func showForSnapshot(icon: NSImage?) {
-        appIconView.image = icon
+        currentAppIcon = icon
         backgroundView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         updateClearButton()
         modeControl.selectedSegment = session.mode == .list ? 0 : 1
@@ -216,6 +218,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         if searchField.placeholderAttributedString?.string != placeholder {
             searchField.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [.foregroundColor: theme.secondaryText, .font: searchField.font!])
         }
+        updateHeaderIcon()
         rowsByID = [:]
         func index(_ row: PaletteRow) { rowsByID[row.id] = row; row.children.forEach(index) }
         content.rows.forEach(index)
@@ -235,6 +238,19 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         for row in rows where row.isExpandable && expanded.contains(row.id) {
             outlineView.expandItem(row)
             expandRows(row.children)
+        }
+    }
+
+    /// The app icon while acting on an app; a neutral "apps" glyph while choosing one.
+    private func updateHeaderIcon() {
+        if session.isPickingApp {
+            appIconView.image = .symbol("square.grid.2x2.fill", pointSize: 20, weight: .medium)
+            appIconView.contentTintColor = theme.secondaryText
+            appIconButton.toolTip = "Back to the current app (Esc)"
+        } else {
+            appIconView.image = currentAppIcon
+            appIconView.contentTintColor = nil
+            appIconButton.toolTip = "Choose the app to act on (⌫ with an empty search)"
         }
     }
 
@@ -415,7 +431,7 @@ final class PaletteController: NSObject, NSWindowDelegate, NSOutlineViewDataSour
         currentApp = running
         session.isPickingApp = false
         session.resetSearchState()
-        appIconView.image = running.icon ?? NSImage(named: NSImage.applicationIconName)
+        currentAppIcon = running.icon ?? NSImage(named: NSImage.applicationIconName)
         let info = AppInfo(running: running)
         session.app = info
         session.scripts = ScriptsLibrary.items(for: running.bundleIdentifier, in: app.scripts)
